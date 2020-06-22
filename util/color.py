@@ -116,7 +116,7 @@ def printc(*args, color='BOLD', bg=None, **kwargs):
         prefix += _color2code(bg, bg=True)
     print(prefix, end='')
     print(*args, **kwargs)
-    print(colors.END, end='')
+    print(colors.END, end='', flush=True)
 
 
 if __name__ == '__main__':
