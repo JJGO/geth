@@ -51,7 +51,7 @@ class StatsMeter:
             the new array using numpy and then that updates the current stats
         """
         if batch:
-            add = self + StatsMeter.from_values(len(iterable), np.mean(iterable), np.std(iterable), 0)
+            add = self + StatsMeter.from_values(len(iterable), np.mean(iterable), np.std(iterable))
             self.n, self.mean, self.S = add.n, add.mean, add.S
         else:
             for datum in iterable:
