@@ -7,4 +7,6 @@ from .datasets import (MNIST,
                        CIFAR10,
                        CIFAR100,
                        ImageNet,
-                       Places365)
+                       Places365,
+                       TinyImageNet,
+                       Miniplaces)

@@ -3,14 +3,16 @@ import os
 
 from torchvision import transforms, datasets
 
-from . import places365
+from .cache import IndexedImageDataset
 
 _constructors = {
     'MNIST': datasets.MNIST,
     'CIFAR10': datasets.CIFAR10,
     'CIFAR100': datasets.CIFAR100,
-    'ImageNet': datasets.ImageNet,
-    'Places365': places365.Places365
+    'ImageNet': IndexedImageDataset,
+    'Places365': IndexedImageDataset,
+    'Miniplaces': IndexedImageDataset,
+    'TinyImageNet': IndexedImageDataset,
 }
 
 
@@ -72,10 +74,6 @@ def dataset_builder(dataset, train=True, normalize=None, preproc=None, path=None
         preproc = transforms.Compose(preproc)
 
     kwargs = {'transform': preproc}
-    if dataset == 'ImageNet':
-        kwargs['split'] = 'train' if train else 'val'
-    else:
-        kwargs['train'] = train
 
     path = dataset_path(dataset, path)
 
@@ -121,8 +119,9 @@ def CIFAR100(train=True, path=None):
 
 
 def ImageNet(train=True, path=None):
-    """Thin wrapper around torchvision.datasets.ImageNet
+    """Thin wrapper around IndexedImageDataset
     """
+    # TODO Better data augmentation?
     # ImageNet loading from files can produce benign EXIF errors
     import warnings
     warnings.filterwarnings("ignore", "(Possibly )?corrupt EXIF data", UserWarning)
@@ -140,15 +139,15 @@ def ImageNet(train=True, path=None):
 
 
 def Places365(train=True, path=None):
-    """Thin wrapper around .datasets.places365.Places365
+    """Thin wrapper around IndexedImageDataset
     """
-
     # Note : Bolei used the normalization for Imagenet, not the one for Places!
     # # https://github.com/CSAILVision/places365/blob/master/train_placesCNN.py
     # So these are kept so weights are compatible
+    # TODO Better data augmentation
     mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
 
-    normalize = transforms.Normalize((mean,), (std,))
+    normalize = transforms.Normalize(mean=mean, std=std)
     if train:
         preproc = [transforms.RandomResizedCrop(224),
                    transforms.RandomHorizontalFlip()]
@@ -156,4 +155,37 @@ def Places365(train=True, path=None):
         preproc = [transforms.Resize(256), transforms.CenterCrop(224)]
     dataset = dataset_builder('Places365', train, normalize, preproc, path)
     dataset.shape = (3, 224, 224)
+    return dataset
+
+
+def TinyImageNet(train=True, path=None):
+    """Thin wrapper around IndexedImageDataset
+    """
+    # TODO Better data augmentation
+
+    mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+    normalize = transforms.Normalize(mean=mean, std=std)
+    if train:
+        preproc = [transforms.RandomHorizontalFlip()]
+    else:
+        preproc = []
+    dataset = dataset_builder('TinyImageNet', train, normalize, preproc, path)
+    dataset.shape = (3, 64, 64)
+    return dataset
+
+
+def Miniplaces(train=True, path=None):
+    """Thin wrapper around IndexedImageDataset
+    """
+    # TODO compute normalization constants for Miniplaces
+    # TODO Better data augmentation
+
+    mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+    normalize = transforms.Normalize(mean=mean, std=std)
+    if train:
+        preproc = [transforms.RandomHorizontalFlip()]
+    else:
+        preproc = []
+    dataset = dataset_builder('Miniplaces', train, normalize, preproc, path)
+    dataset.shape = (3, 128, 128)
     return dataset
