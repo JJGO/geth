@@ -6,25 +6,17 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.backends import cudnn
-
-from torchvision import datasets as tv_datasets
-from torchvision import transforms
-from torchviz import make_dot
+from torchvision import models
 
 from .base import Experiment
-from ..util import printc, summary, StatsMeter
+from .util import allbut
+from ..util import printc, StatsMeter
+from ..log import summary, make_dot
 
-from .. import models
+# from .. import models
 from .. import datasets
 from .. import callbacks
-
-
-def allbut(mapping, keys):
-    import copy
-    mapping = copy.deepcopy(mapping)
-    for k in keys:
-        del mapping[k]
-    return mapping
+from ..metrics import correct
 
 
 class TrainingExperiment(Experiment):
@@ -48,36 +40,25 @@ class TrainingExperiment(Experiment):
         self.run_epochs()
 
     def build_data(self, dataset, **data_kwargs):
-
         if hasattr(datasets, dataset):
             constructor = getattr(datasets, dataset)
-            kwargs = allbut(data_kwargs, ['dataloader', 'resize'])
+            kwargs = allbut(data_kwargs, ['dataloader'])
             self.train_dataset = constructor(train=True, **kwargs)
             self.val_dataset = constructor(train=False, **kwargs)
-
-        elif hasattr(tv_datasets, dataset):
-            constructor = getattr(tv_datasets, dataset)
-            self.train_dataset = constructor('/tmp/torch_data', train=True, download=True, transform=transforms.ToTensor())
-            self.val_dataset = constructor('/tmp/torch_data', train=False, download=True, transform=transforms.ToTensor())
 
         else:
             raise ValueError(f"Dataset {dataset} is not recognized")
 
-        if 'resize' in data_kwargs:
-            ratio = data_kwargs['resize']
-            self.train_dataset = ResizeDataset(self.train_dataset, ratio=ratio)
-            self.val_dataset = ResizeDataset(self.val_dataset, ratio=ratio)
-
         self.train_dl = DataLoader(self.train_dataset, shuffle=True, **data_kwargs['dataloader'])
         self.val_dl = DataLoader(self.val_dataset, shuffle=False, **data_kwargs['dataloader'])
 
-    def build_model(self, model, resume=None, **model_kwargs):
-        # in_ch = self.train_dataset.shape[-1]
-        # out_ch = self.train_dataset.outshape[-1]
+    def build_model(self, arch, resume=None, **model_kwargs):
 
-        if hasattr(models, model):
-            constructor = getattr(models, model)
+        if hasattr(models, arch):
+            constructor = getattr(models, arch)
             self.model = constructor(**model_kwargs)
+        else:
+            raise ValueError(f"Model {arch} not found in libary")
 
         if resume is not None:
             self.resume = pathlib.Path(self.resume)
@@ -85,14 +66,9 @@ class TrainingExperiment(Experiment):
             previous = torch.load(self.resume)
             self.model.load_state_dict(previous['model_state_dict'])
 
-    def build_loss(self, loss, flatten=True, crop=False, **loss_kwargs):
+    def build_loss(self, loss, **loss_kwargs):
         if hasattr(nn, loss):
             loss_func = getattr(nn, loss)(**loss_kwargs)
-        if flatten:
-            loss_func = flatten_loss(loss_func)
-        if crop:
-            assert 'resize' in self.cfg['data']
-            loss_func = crop_loss(loss_func, ratio=self.cfg['data']['resize'])
 
         self.loss_func = loss_func
 
@@ -167,7 +143,7 @@ class TrainingExperiment(Experiment):
             for epoch in range(self.epochs):
                 printc(f"Start epoch {epoch}", color='YELLOW')
                 self.train(epoch)
-                # self.eval(epoch) TODO Uncomment
+                self.eval(epoch)
                 self.log_epoch(epoch)
 
                 with torch.set_grad_enabled(False):
@@ -179,15 +155,17 @@ class TrainingExperiment(Experiment):
 
     def run_epoch(self, train, epoch=0):
         if train:
-            self.model.train()
             prefix = 'train'
+            self.model.train()
             dl = self.train_dl
         else:
             prefix = 'val'
-            dl = self.val_dl
             self.model.eval()
+            dl = self.val_dl
 
         total_loss = StatsMeter()
+        acc1 = StatsMeter()
+        acc5 = StatsMeter()
 
         epoch_iter = tqdm(dl)
         epoch_iter.set_description(f"{prefix.capitalize()} Epoch {epoch}/{self.epochs}")
@@ -203,9 +181,12 @@ class TrainingExperiment(Experiment):
                     self.optim.step()
                     self.optim.zero_grad()
 
+                c1, c5 = correct(yhat, y, (1, 5))
                 total_loss.add(loss.item() / dl.batch_size)
+                acc1.add(c1 / dl.batch_size)
+                acc5.add(c5 / dl.batch_size)
 
-                postfix = {'loss': total_loss.mean}
+                postfix = {'loss': total_loss.mean, 'top1': acc1.mean, 'top5': acc5.mean}
                 for cb in self.batch_callbacks:
                     cb(self, postfix)
 
@@ -213,6 +194,8 @@ class TrainingExperiment(Experiment):
 
         self.log(**{
             f'{prefix}_loss': total_loss.mean,
+            f'{prefix}_acc1': acc1.mean,
+            f'{prefix}_acc5': acc5.mean,
         })
 
         return total_loss.mean
@@ -222,3 +205,12 @@ class TrainingExperiment(Experiment):
 
     def eval(self, epoch=0):
         return self.run_epoch(False, epoch)
+
+    def load(self):
+        # Check path exists and load
+        # TODO
+        raise NotImplementedError("TODO")
+
+    def resume(self):
+        # TODO resume where we left things off
+        raise NotImplementedError("TODO")
