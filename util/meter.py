@@ -1,3 +1,4 @@
+from collections import defaultdict
 import numpy as np
 
 
@@ -178,16 +179,16 @@ class MaxMinMeter:
 class StatsMeterMap:
 
     def __init__(self, *keys):
-        self.stats = {}
+        self.stats = defaultdict(StatsMeter)
         if keys is not None:
             self.register(*keys)
 
     def register(self, *keys):
         for k in keys:
-            if k not in self.stats:
-                self.stats[k] = StatsMeter()
+            self.stats[k]
 
     def __str__(self):
         s = "Stats"
+        max_len = max(len(k) for k in self.stats)
         for k in self.stats:
-            s += f'  {k}:  {str(self.stats[k])}'
+            s += f'  {k:>{max_len}s}:  {str(self.stats[k])}'
