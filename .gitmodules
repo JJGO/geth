@@ -1,0 +1,3 @@
+[submodule "pylot"]
+	path = pylot
+	url = git@github.com:JJGO/pylot.git
