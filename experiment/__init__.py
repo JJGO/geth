@@ -1,2 +1,1 @@
-from .base import Experiment
-from .train import TrainingExperiment
+from .distributed import DistributedExperiment
