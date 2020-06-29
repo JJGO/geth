@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from .. import optim
-from ..optim import LocalOptim
 
 
 class DistributedExperiment(Experiment):
@@ -20,11 +19,6 @@ class DistributedExperiment(Experiment):
 
 class DistributedTrainingExperiment(TrainExperiment, DistributedExperiment):
 
-    # TODO: every k_iterations all_reduce the parameters and buffers
-    # TODO: Post-Local SGD params are
-    #    - steps to take with constant averaging, (time to basin)
-    #    - frequency of parameter averagining
-
     OPTIMS = [torch.optim, optim]
 
     def __init__(self, distributed=None, **kwargs):
@@ -32,7 +26,7 @@ class DistributedTrainingExperiment(TrainExperiment, DistributedExperiment):
         self.distributed = distributed
         if self.distributed is not None:
             # Assign current path
-            # TODO: specialize logging using the cfg['distributed']['global_rank'] (just add a subpath)
+            #       specialize logging using the cfg['distributed']['global_rank'] (just add a subpath)
             #       but make sure if resuming this is not done, i.e. the subpath should not be reflected in the self.cfg
             #       |- This should be fine, since for resuming the whole path is used?
             self.parent_path = self.path
@@ -41,10 +35,9 @@ class DistributedTrainingExperiment(TrainExperiment, DistributedExperiment):
             self.build_data(**self.cfg['data'])
             self.build_model(**self.cfg['model'])
             self.build_loss(**self.cfg['loss'])
-            self.build_train(**self.cfg['train'])
+            self.biild_train(**self.cfg['train'])
 
     def build_dataloader(self, **dataloader_kwargs):
-        # TODO: Initialize the Distributed Sampler correctly
         train_sampler = DistributedSampler(dataset=self.train_dataset,
                                            num_replicas=self.distributed['num_tasks'],
                                            rank=self.distributed['global_rank'])
@@ -62,7 +55,7 @@ class DistributedTrainingExperiment(TrainExperiment, DistributedExperiment):
                 self.eval(epoch)
                 self.log_epoch(epoch)
 
-                with torch.set_grad_enabled(False):
+                with torch.no_grad():
                     for cb in self.epoch_callbacks:
                         cb(self, epoch)
 

@@ -1,6 +1,9 @@
 import torch
-from torch.optim import Optimizer
 import torch.optim
+import torch.distributed as dist
+
+from torch.optim import Optimizer
+
 from ..comm import communicate
 
 
@@ -23,11 +26,16 @@ class LocalOptim(Optimizer):
         self._counter += 1
         if self._counter % self.frequency == 0:
             self._counter = 0
-
             self._avg_parameters()
 
     def _avg_parameters(self):
-
+        params = []
+        world_size = dist.get_world_size()  # Get world size
+        for group in self.param_groups:
+            for p in group['params']:
+                p.data.div_(world_size)
+                params.append(p.data)
+        communicate(params, dist.all_reduce, group=dist.group.WORLD)
 
     def set_frequency(self, frequency):
         self._avg_parameters()
