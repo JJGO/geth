@@ -1,7 +1,7 @@
 # import torch.distributed as dist
 
 import torch
-from tqdm import tqdm  # TODO remove tqdm, unnecessary for SLURM stuff
+from tqdm import tqdm
 
 from pylot.experiment import TrainExperiment, Experiment
 from pylot.util import printc, StatsMeter, StatsTimer
@@ -17,32 +17,32 @@ class DistributedExperiment(Experiment):
     pass
 
 
-class DistributedTrainingExperiment(TrainExperiment, DistributedExperiment):
+class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
 
     OPTIMS = [torch.optim, optim]
 
     def __init__(self, distributed=None, **kwargs):
-        super().__init__(**kwargs)
+        Experiment.__init__(self, **kwargs)
         self.distributed = distributed
         if self.distributed is not None:
-            # Assign current path
-            #       specialize logging using the cfg['distributed']['global_rank'] (just add a subpath)
-            #       but make sure if resuming this is not done, i.e. the subpath should not be reflected in the self.cfg
-            #       |- This should be fine, since for resuming the whole path is used?
+            # Differs from TrainExperiment in specializing the path to the replica number
             self.parent_path = self.path
             self.path = self.parent_path / str(distributed['global_rank'])
 
-            self.build_data(**self.cfg['data'])
-            self.build_model(**self.cfg['model'])
-            self.build_loss(**self.cfg['loss'])
-            self.biild_train(**self.cfg['train'])
+        self.build_data(**self.cfg['data'])
+        self.build_model(**self.cfg['model'])
+        self.build_loss(**self.cfg['loss'])
+        self.build_train(**self.cfg['train'])
 
     def build_dataloader(self, **dataloader_kwargs):
+        # Need a distributed sampler
+        num_replicas = self.distributed['num_tasks'] if self.distributed is not None else 1
+        rank = self.distributed['global_rank'] if self.distributed is not None else 0
         train_sampler = DistributedSampler(dataset=self.train_dataset,
-                                           num_replicas=self.distributed['num_tasks'],
-                                           rank=self.distributed['global_rank'])
+                                           num_replicas=num_replicas,
+                                           rank=rank)
 
-        self.train_dl = DataLoader(self.train_dataset, shuffle=True, sampler=train_sampler, **dataloader_kwargs)
+        self.train_dl = DataLoader(self.train_dataset, sampler=train_sampler, **dataloader_kwargs)
         self.val_dl = DataLoader(self.val_dataset, shuffle=False, **dataloader_kwargs)
 
     def run_epochs(self, start=0, end=None):
@@ -53,15 +53,16 @@ class DistributedTrainingExperiment(TrainExperiment, DistributedExperiment):
                 self.train(epoch)
                 self.checkpoint()  # We checkpoint every epoch for reference
                 self.eval(epoch)
-                self.log_epoch(epoch)
 
                 with torch.no_grad():
                     for cb in self.epoch_callbacks:
                         cb(self, epoch)
 
+                self.log_epoch(epoch)
+
         except KeyboardInterrupt:
             printc(f"\nInterrupted at epoch {epoch}. Tearing Down", color='RED')
-            self.checkpoint(self.log_epoch_n-1)
+            self.checkpoint(self.log_epoch_n - 1)
 
     def run_epoch(self, train, epoch=0):
         if train:
@@ -76,12 +77,14 @@ class DistributedTrainingExperiment(TrainExperiment, DistributedExperiment):
         total_loss = StatsMeter()
         acc1 = StatsMeter()
         acc5 = StatsMeter()
-
-        epoch_progress = tqdm(dl)
-        epoch_progress.set_description(f"{prefix.capitalize()} Epoch {epoch}/{self.epochs}")
-        epoch_iter = iter(epoch_progress)
-
         timer = StatsTimer()
+
+        if self.cfg['log'].get('progress', True):
+            epoch_progress = tqdm(dl)
+            epoch_progress.set_description(f"{prefix.capitalize()} Epoch {epoch}/{self.epochs}")
+            epoch_iter = iter(epoch_progress)
+        else:
+            epoch_iter = iter(dl)
 
         with torch.set_grad_enabled(train):
             for _ in range(len(dl)):
@@ -104,10 +107,12 @@ class DistributedTrainingExperiment(TrainExperiment, DistributedExperiment):
                 acc5.add(c5 / dl.batch_size)
 
                 postfix = {'loss': total_loss.mean, 'top1': acc1.mean, 'top5': acc5.mean}
-                epoch_progress.set_postfix(postfix)
 
                 for cb in self.batch_callbacks:
                     cb(self, postfix)
+
+                if self.cfg['log'].get('progress', True):
+                    epoch_progress.set_postfix(postfix)
 
         self.log({
             f'{prefix}_loss': total_loss.mean,

@@ -1,1 +1,1 @@
-from .distributed import DistributedExperiment
+from .distributed import DistributedExperiment, DistributedTrainExperiment
