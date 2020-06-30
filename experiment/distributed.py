@@ -63,28 +63,33 @@ class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
         try:
             for epoch in range(start, end):
                 printc(f"Start epoch {epoch}", color='YELLOW')
+                self._epoch = epoch
+                self.sync_before_epoch()
+                self.checkpoint(tag='last')
+                self.checkpoint(tag=f"{epoch:03d}")
+                self.log(epoch=epoch)
                 self.train(epoch)
-                self.checkpoint()  # We checkpoint every epoch for reference
                 self.eval(epoch)
 
                 with torch.no_grad():
                     for cb in self.epoch_callbacks:
                         cb(self, epoch)
 
-                self.log_epoch(epoch)
+                self.dump_logs()
 
         except KeyboardInterrupt:
             printc(f"\nInterrupted at epoch {epoch}. Tearing Down", color='RED')
-            self.checkpoint(self.log_epoch_n - 1)
+            self.checkpoint(tag='interrupt')
 
     def run_epoch(self, train, epoch=0):
+        progress = self.get_param('log.progress', True)
         if train:
             self.model.train()
-            prefix = 'train'
+            phase = 'train'
             dl = self.train_dl
         else:
             self.model.eval()
-            prefix = 'val'
+            phase = 'val'
             dl = self.val_dl
 
         total_loss = StatsMeter()
@@ -92,9 +97,9 @@ class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
         acc5 = StatsMeter()
         timer = StatsTimer()
 
-        if self.cfg['log'].get('progress', True):
+        if progress:
             epoch_progress = tqdm(dl)
-            epoch_progress.set_description(f"{prefix.capitalize()} Epoch {epoch}/{self.epochs}")
+            epoch_progress.set_description(f"{phase.capitalize()} Epoch {epoch}/{self.epochs}")
             epoch_iter = iter(epoch_progress)
         else:
             epoch_iter = iter(dl)
@@ -124,13 +129,16 @@ class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
                 for cb in self.batch_callbacks:
                     cb(self, postfix)
 
-                if self.cfg['log'].get('progress', True):
+                if progress:
                     epoch_progress.set_postfix(postfix)
 
         self.log({
-            f'{prefix}_loss': total_loss.mean,
-            f'{prefix}_acc1': acc1.mean,
-            f'{prefix}_acc5': acc5.mean,
-        }, timer.measurements)
+            f'{phase}_loss': total_loss.mean,
+            f'{phase}_acc1': acc1.mean,
+            f'{phase}_acc5': acc5.mean,
+        })
+
+        if train:
+            self.log(timer.measurements)
 
         return total_loss.mean
