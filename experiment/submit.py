@@ -15,6 +15,7 @@ class CheckpointWrapper:
         if issubclass(self.experiment_class, DistributedExperiment):
             job_env = submitit.JobEnvironment()
             master_node = job_env.hostnames[0]
+            # import os; os.environ['CUDA_VISIBLE_DEVICES'] = str(job_env.global_rank)  # TODO REMOVE
             kwargs['distributed'] = dict(
                 global_rank=job_env.global_rank,
                 local_rank=job_env.local_rank,
@@ -36,16 +37,18 @@ class CheckpointWrapper:
             self.experiment.resume()
 
     def checkpoint(self, **kwargs):
-        printc("SubmiIt checkpoint", color='ORANGE')
-        self.experiment.checkpoint()
+        printc("SubmitIt checkpoint", color='ORANGE')
         resubmit = CheckpointWrapper(self.experiment_class)
-        # Need to use parent path for the whole resubmission
         path = self.experiment.path.as_posix()
-        # Only master resubmits
+        # Only the master node gets the checkpoint and requeue signal
         if issubclass(self.experiment_class, DistributedExperiment):
+            # Need to use parent path for the whole resubmission
             path = self.experiment.parent_path.as_posix()
             if self.experiment.distributed['global_rank'] != 0:
                 return
+        else:
+            self.experiment.checkpoint(tag='interrupt')
+
         return submitit.helpers.DelayedSubmission(resubmit, path=path)
 
 
