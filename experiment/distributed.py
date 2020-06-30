@@ -7,6 +7,7 @@ from pylot.experiment import TrainExperiment, Experiment
 from pylot.util import printc, StatsMeter, StatsTimer
 from pylot.metrics import correct
 
+import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
@@ -44,6 +45,18 @@ class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
 
         self.train_dl = DataLoader(self.train_dataset, sampler=train_sampler, **dataloader_kwargs)
         self.val_dl = DataLoader(self.val_dataset, shuffle=False, **dataloader_kwargs)
+
+    def sync_before_epoch(self):
+        # Check all workers are on the same page
+        device = self.device
+        src = torch.Tensor([self._epoch]).to(device)
+        dest = [torch.Tensor([-1]).to(device) for _ in range(self.distributed['num_tasks'])]
+        dist.all_gather(dest, src)
+
+        for i, val in enumerate(dest):
+            other_epoch = val.item()
+            if other_epoch != self._epoch:
+                raise ValueError(f"Node {i} is on epoch:{other_epoch} but I'm on epoch:{self._epoch}")
 
     def run_epochs(self, start=0, end=None):
         end = self.epochs if end is None else end
