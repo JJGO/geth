@@ -26,9 +26,9 @@ class LocalOptim(Optimizer):
         self._counter += 1
         if self._counter % self.frequency == 0:
             self._counter = 0
-            self._avg_parameters()
+            self.avg_parameters()
 
-    def _avg_parameters(self):
+    def avg_parameters(self):
         params = []
         world_size = dist.get_world_size()  # Get world size
         for group in self.optim.param_groups:
@@ -38,7 +38,7 @@ class LocalOptim(Optimizer):
         communicate(params, dist.all_reduce)
 
     def set_frequency(self, frequency):
-        self._avg_parameters()
+        self.avg_parameters()
         self._counter = 0
         self.frequency = frequency
 
