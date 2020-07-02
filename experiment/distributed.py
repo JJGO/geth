@@ -1,34 +1,42 @@
-# import torch.distributed as dist
-
 import torch
 from tqdm import tqdm
 
-from pylot.experiment import TrainExperiment, Experiment
-from pylot.util import printc, StatsMeter, StatsTimer
-from pylot.metrics import correct
 
 import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+from pylot.experiment import TrainExperiment, Experiment
+from pylot.util import printc, StatsMeter, CUDATimer
+from pylot.metrics import correct
+from ..optim import LocalOptim
 
 from .. import optim
 
 
 class DistributedExperiment(Experiment):
-    pass
+
+    def __init__(self, env=None, cfg=None, **kwargs):
+        super().__init__(cfg=cfg, **kwargs)
+        self.env = env
+        if self.env is not None:
+            assert env['num_tasks'] == self.get_param('distributed.world_size')
+            # Differs from TrainExperiment in specializing the path to the replica number
+            self.parent_path = self.path
+            self.path = self.parent_path / str(env['global_rank'])
+
+    @property
+    def is_master(self):
+        return self.env['global_rank'] == 0
 
 
 class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
 
     OPTIMS = [torch.optim, optim]
 
-    def __init__(self, distributed=None, **kwargs):
-        Experiment.__init__(self, **kwargs)
-        self.distributed = distributed
-        if self.distributed is not None:
-            # Differs from TrainExperiment in specializing the path to the replica number
-            self.parent_path = self.path
-            self.path = self.parent_path / str(distributed['global_rank'])
+    def __init__(self, env=None, **kwargs):
+        DistributedExperiment.__init__(self, env=env, **kwargs)
 
         self.build_data(**self.cfg['data'])
         self.build_model(**self.cfg['model'])
@@ -36,21 +44,29 @@ class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
         self.build_train(**self.cfg['train'])
 
     def build_dataloader(self, **dataloader_kwargs):
-        # Need a distributed sampler
-        num_replicas = self.distributed['num_tasks'] if self.distributed is not None else 1
-        rank = self.distributed['global_rank'] if self.distributed is not None else 0
-        train_sampler = DistributedSampler(dataset=self.train_dataset,
-                                           num_replicas=num_replicas,
-                                           rank=rank)
+        # Need a distributed sampler for data parallel jobs
+        if self.env is not None:
+            train_sampler = DistributedSampler(dataset=self.train_dataset,
+                                               num_replicas=self.env['num_tasks'],
+                                               rank=self.env['global_rank'])
 
-        self.train_dl = DataLoader(self.train_dataset, sampler=train_sampler, **dataloader_kwargs)
-        self.val_dl = DataLoader(self.val_dataset, shuffle=False, **dataloader_kwargs)
+            self.train_dl = DataLoader(self.train_dataset, sampler=train_sampler, **dataloader_kwargs)
+            self.val_dl = DataLoader(self.val_dataset, shuffle=False, **dataloader_kwargs)
+
+    def build_model(self, model, weights=None, ddp=False, **model_kwargs):
+        super().build_model(model, weights=weights, **model_kwargs)
+        self.ddp = ddp
+
+    def to_device(self):
+        super().to_device()
+        if self.ddp:
+            self.model = DDP(self.model)
 
     def sync_before_epoch(self):
         # Check all workers are on the same page
         device = self.device
         src = torch.Tensor([self._epoch]).to(device)
-        dest = [torch.Tensor([-1]).to(device) for _ in range(self.distributed['num_tasks'])]
+        dest = [torch.Tensor([-1]).to(device) for _ in range(self.env['num_tasks'])]
         dist.all_gather(dest, src)
 
         for i, val in enumerate(dest):
@@ -60,26 +76,21 @@ class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
 
     def run_epochs(self, start=0, end=None):
         end = self.epochs if end is None else end
-        try:
-            for epoch in range(start, end):
-                printc(f"Start epoch {epoch}", color='YELLOW')
-                self._epoch = epoch
-                self.sync_before_epoch()
-                self.checkpoint(tag='last')
-                self.checkpoint(tag=f"{epoch:03d}")
-                self.log(epoch=epoch)
-                self.train(epoch)
-                self.eval(epoch)
+        for epoch in range(start, end):
+            printc(f"Start epoch {epoch}", color='YELLOW')
+            self._epoch = epoch
+            self.sync_before_epoch()
+            self.checkpoint(tag='last')
+            self.checkpoint(tag=f"{epoch:03d}")
+            self.log(epoch=epoch)
+            self.train(epoch)
+            self.eval(epoch)
 
-                with torch.no_grad():
-                    for cb in self.epoch_callbacks:
-                        cb(self, epoch)
+            with torch.no_grad():
+                for cb in self.epoch_callbacks:
+                    cb(self, epoch)
 
-                self.dump_logs()
-
-        except KeyboardInterrupt:
-            printc(f"\nInterrupted at epoch {epoch}. Tearing Down", color='RED')
-            self.checkpoint(tag='interrupt')
+            self.dump_logs()
 
     def run_epoch(self, train, epoch=0):
         progress = self.get_param('log.progress', True)
@@ -95,7 +106,7 @@ class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
         total_loss = StatsMeter()
         acc1 = StatsMeter()
         acc5 = StatsMeter()
-        timer = StatsTimer()
+        timer = CUDATimer(skip=10, unit='ms')
 
         if progress:
             epoch_progress = tqdm(dl)
@@ -132,13 +143,15 @@ class DistributedTrainExperiment(TrainExperiment, DistributedExperiment):
                 if progress:
                     epoch_progress.set_postfix(postfix)
 
+        if train:
+            self.log(timer.measurements)
+            if isinstance(self.optim, LocalOptim):
+                self.optim.avg_parameters()
+
         self.log({
             f'{phase}_loss': total_loss.mean,
             f'{phase}_acc1': acc1.mean,
             f'{phase}_acc5': acc5.mean,
         })
-
-        if train:
-            self.log(timer.measurements)
 
         return total_loss.mean
