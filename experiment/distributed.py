@@ -3,7 +3,7 @@ import pathlib
 
 import torch
 from tqdm import tqdm
-
+import yaml
 
 import torch.distributed as dist
 from torch.utils.data import DataLoader
@@ -13,7 +13,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from pylot.experiment import VisionClassificationTrainExperiment as VCTE, Experiment
 from pylot.util import printc, StatsMeter, CUDATimer
 from pylot.metrics import correct
-from ..optim import LocalOptim
 
 from .. import optim
 
@@ -164,13 +163,25 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
 
         if train:
             self.log(timer.measurements)
-            if isinstance(self.optim, LocalOptim):
+            if isinstance(self.optim, optim.LocalOptim):
                 self.optim.avg_parameters()
 
         self.log(meters)
 
 
-class ResumeDTE(DistributedTrainExperiment):
+class ResumeLocalDTE(DistributedTrainExperiment):
+    def __init__(self, sync_model_path=None, frequency=None, path=None):
+        if path is None:
+            self.sync_model_path = pathlib.Path(sync_model_path)
+            with (self.sync_model_path / "config.yml").open("r") as f:
+                cfg = yaml.load(f, Loader=yaml.FullLoader)
+            cfg["train"]["inner_optim"] = cfg["train"]["optim"]
+            cfg["train"]["optim"] = optim.LocalOptim
+            cfg["train"]["frequency"] = frequency
+            super().__init__(**cfg)
+        else:
+            super().__init__(path=path)
+
     def build_train(self, sync_model, optim, epochs, **optim_kwargs):
         # Takes a model to use the epoch weights from
         # It then symlinks the synced parent checkpoints so they can be loaded
@@ -190,6 +201,7 @@ class ResumeDTE(DistributedTrainExperiment):
             self._epoch = epoch
             self.sync_before_epoch()
             self.load(f"{epoch:03d}-sync")
+            self.prepare_optim()
             self.log(epoch=epoch)
             self.train(epoch)
             self.eval(epoch)
@@ -200,3 +212,12 @@ class ResumeDTE(DistributedTrainExperiment):
                     cb(self, epoch)
 
             self.dump_logs()
+
+    def prepare_optim(self):
+        assert isinstance(
+            self.optim, optim.LocalOptim
+        ), f"Optim mush be LocalOptim, found {self.optim.__class__.__name__}"
+        assert (
+            self.optim.frequency == 1
+        ), f"Loaded LocalOptim must have frequency 1, found {self.optim.frequency}"
+        self.optim.frequency = self.get_param("train.frequency")
