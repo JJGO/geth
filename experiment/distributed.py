@@ -45,6 +45,10 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
         self.build_loss(**self.cfg["loss"])
         self.build_train(**self.cfg["train"])
 
+    @property
+    def checkpoint_path(self):
+        return self.parent_path / "checkpoints"
+
     def build_dataloader(self, **dataloader_kwargs):
         # Need a distributed sampler for data parallel jobs
         if self.env is not None:
@@ -64,6 +68,12 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
     def build_model(self, model, weights=None, ddp=False, **model_kwargs):
         super().build_model(model, weights=weights, **model_kwargs)
         self.ddp = ddp
+
+    def checkpoint(self, tag=None):
+        # Only master worker should checkpoint since all models are synchronized
+        # at the epoch boundary
+        if self.get_param("distributed.global_rank") == 0:
+            super().checkpoint(tag=tag)
 
     def to_device(self):
         super().to_device()
