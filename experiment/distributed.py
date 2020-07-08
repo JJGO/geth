@@ -124,6 +124,8 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
 
         meters = defaultdict(StatsMeter)
         timer = CUDATimer(skip=10, unit="ms")
+        if not self.get_param("log.timing", False):
+            timer.disable()
 
         epoch_iter = iter(dl)
         if progress:
