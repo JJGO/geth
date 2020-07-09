@@ -172,27 +172,35 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
 
 
 class ResumeLocalDTE(DistributedTrainExperiment):
-    def __init__(self, sync_model_path=None, frequency=None, path=None):
+    def __init__(self, sync_model_path=None, frequency=None, path=None, env=None):
         if path is None:
             self.sync_model_path = pathlib.Path(sync_model_path)
             with (self.sync_model_path / "config.yml").open("r") as f:
                 cfg = yaml.load(f, Loader=yaml.FullLoader)
-            cfg["train"]["inner_optim"] = cfg["train"]["optim"]
-            cfg["train"]["optim"] = optim.LocalOptim
+
+            if (
+                cfg["train"]["optim"] != "LocalOptim"
+            ):  # So that we could use DDP weights
+                cfg["train"]["inner_optim"] = cfg["train"]["optim"]
+                cfg["train"]["optim"] = "LocalOptim"
             cfg["train"]["frequency"] = frequency
-            super().__init__(**cfg)
+            cfg["train"]["sync_model"] = sync_model_path
+            cfg["experiment"]["type"] = self.__class__.__name__
+            super().__init__(**cfg, env=env)
         else:
-            super().__init__(path=path)
+            super().__init__(path=path, env=env)
 
     def build_train(self, sync_model, optim, epochs, **optim_kwargs):
         # Takes a model to use the epoch weights from
         # It then symlinks the synced parent checkpoints so they can be loaded
         super().build_train(optim, epochs, **optim_kwargs)
-        sync_model_path = pathlib.Path(sync_model)
-        checkpoint_path = self.path / "checkpoints"
 
-        for checkpoint in (sync_model_path / "checkpoints").iterdir():
-            link = checkpoint_path / f"{checkpoint.stem}-sync.pt"
+        sync_model_path = pathlib.Path(sync_model)
+        self.checkpoint_path.mkdir(parents=True, exist_ok=True)
+
+        for epoch in range(self.get_param("train.epochs")):
+            checkpoint = sync_model_path / "checkpoints" / f"{epoch:03d}.pt"
+            link = self.checkpoint_path / f"{epoch:03d}-sync.pt"
             if not link.exists():
                 link.symlink_to(checkpoint)
 
