@@ -21,10 +21,10 @@ class DistributedExperiment(Experiment):
     def __init__(self, env=None, cfg=None, **kwargs):
         super().__init__(cfg=cfg, **kwargs)
         self.env = env
+        self.parent_path = self.path
         if self.env is not None:
             assert env["num_tasks"] == self.get_param("distributed.world_size")
             # Differs from TrainExperiment in specializing the path to the replica number
-            self.parent_path = self.path
             self.path = self.parent_path / str(env["global_rank"])
 
     @property
@@ -71,7 +71,7 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
     def checkpoint(self, tag=None):
         # Only master worker should checkpoint since all models are synchronized
         # at the epoch boundary
-        if self.get_param("distributed.global_rank") == 0:
+        if self.env["global_rank"] == 0:
             super().checkpoint(tag=tag)
 
     def to_device(self):
@@ -110,6 +110,7 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
                     cb(self, epoch)
 
             self.dump_logs()
+        self.checkpoint(tag=f"{end:03d}")
 
     def run_epoch(self, train, epoch=0):
         progress = self.get_param("log.progress", True)
@@ -202,7 +203,7 @@ class ResumeLocalDTE(DistributedTrainExperiment):
             printc(f"Start epoch {epoch}", color="YELLOW")
             self._epoch = epoch
             self.sync_before_epoch()
-            self.load(f"{epoch:03d}-sync")
+            self.reload(f"{epoch:03d}-sync")
             self.prepare_optim()
             self.log(epoch=epoch)
             self.train(epoch)
