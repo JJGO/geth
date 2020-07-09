@@ -113,7 +113,7 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
         self.checkpoint(tag=f"{end:03d}")
 
     def run_epoch(self, train, epoch=0):
-        progress = self.get_param("log.progress", True)
+        progress = self.get_param("log.progress", False)
         if train:
             self.model.train()
             phase = "train"
@@ -125,8 +125,6 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
 
         meters = defaultdict(StatsMeter)
         timer = CUDATimer(skip=10, unit="ms")
-        if not self.get_param("log.timing", False):
-            timer.disable()
 
         epoch_iter = iter(dl)
         if progress:
@@ -165,7 +163,8 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
                     epoch_progress.set_postfix(postfix)
 
         if train:
-            self.log(timer.measurements)
+            if self.get_param("log.timing", False):
+                self.log(timer.measurements)
             if isinstance(self.optim, optim.LocalOptim):
                 self.optim.avg_parameters()
 
