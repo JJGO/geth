@@ -1,9 +1,9 @@
-from collections import defaultdict
 import pathlib
+import yaml
 
 import torch
-from tqdm import tqdm
-import yaml
+import torchvision.models
+from torch import nn
 
 import torch.distributed as dist
 from torch.utils.data import DataLoader
@@ -11,8 +11,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from pylot.experiment import VisionClassificationTrainExperiment as VCTE, Experiment
-from pylot.util import printc, StatsMeter, CUDATimer
-from pylot.metrics import correct
+from pylot.util import printc
 
 from .. import optim
 
@@ -103,72 +102,16 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
             self.checkpoint(tag=f"{epoch:03d}")
             self.log(epoch=epoch)
             self.train(epoch)
+            if isinstance(self.optim, optim.LocalOptim):
+                self.optim.avg_parameters()
             self.eval(epoch)
 
             with torch.no_grad():
                 for cb in self.epoch_callbacks:
-                    cb(self, epoch)
+                    cb(epoch)
 
             self.dump_logs()
         self.checkpoint(tag=f"{end:03d}")
-
-    def run_epoch(self, train, epoch=0):
-        progress = self.get_param("log.progress", False)
-        if train:
-            self.model.train()
-            phase = "train"
-            dl = self.train_dl
-        else:
-            self.model.eval()
-            phase = "val"
-            dl = self.val_dl
-
-        meters = defaultdict(StatsMeter)
-        timer = CUDATimer(skip=10, unit="ms")
-
-        epoch_iter = iter(dl)
-        if progress:
-            epoch_progress = tqdm(epoch_iter)
-            epoch_progress.set_description(
-                f"{phase.capitalize()} Epoch {epoch}/{self.epochs}"
-            )
-            epoch_iter = iter(epoch_progress)
-
-        with torch.set_grad_enabled(train):
-            for _ in range(len(dl)):
-                with timer("t_data"):
-                    x, y = next(epoch_iter)
-                    x, y = x.to(self.device), y.to(self.device)
-                with timer("t_forward"):
-                    yhat = self.model(x)
-                    loss = self.loss_func(yhat, y)
-                if train:
-                    with timer("t_backward"):
-                        loss.backward()
-                    with timer("t_optim"):
-                        self.optim.step()
-                        self.optim.zero_grad()
-
-                c1, c5 = correct(yhat, y, (1, 5))
-                meters[f"{phase}_loss"].add(loss.item())
-                meters[f"{phase}_acc1"].add(c1 / dl.batch_size)
-                meters[f"{phase}_acc5"].add(c5 / dl.batch_size)
-
-                postfix = {k: v.mean for k, v in meters.items()}
-
-                for cb in self.batch_callbacks:
-                    cb(self, postfix)
-
-                if progress:
-                    epoch_progress.set_postfix(postfix)
-
-        if train:
-            if self.get_param("log.timing", False):
-                self.log(timer.measurements)
-            if isinstance(self.optim, optim.LocalOptim):
-                self.optim.avg_parameters()
-
-        self.log(meters)
 
 
 class ResumeLocalDTE(DistributedTrainExperiment):
@@ -178,11 +121,6 @@ class ResumeLocalDTE(DistributedTrainExperiment):
             with (self.sync_model_path / "config.yml").open("r") as f:
                 cfg = yaml.load(f, Loader=yaml.FullLoader)
 
-            if (
-                cfg["train"]["optim"] != "LocalOptim"
-            ):  # So that we could use DDP weights
-                cfg["train"]["inner_optim"] = cfg["train"]["optim"]
-                cfg["train"]["optim"] = "LocalOptim"
             cfg["train"]["frequency"] = frequency
             cfg["train"]["sync_model"] = sync_model_path
             cfg["experiment"]["type"] = self.__class__.__name__
@@ -214,12 +152,14 @@ class ResumeLocalDTE(DistributedTrainExperiment):
             self.prepare_optim()
             self.log(epoch=epoch)
             self.train(epoch)
+            if isinstance(self.optim, optim.LocalOptim):
+                self.optim.avg_parameters()
             self.eval(epoch)
             self.checkpoint(tag=f"{epoch+1:03d}-local")
 
             with torch.no_grad():
                 for cb in self.epoch_callbacks:
-                    cb(self, epoch)
+                    cb(epoch)
 
             self.dump_logs()
 
