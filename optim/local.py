@@ -18,9 +18,9 @@ class LocalOptim(Optimizer):
         self._counter = 0
 
     @torch.no_grad()
-    def step(self):
+    def step(self, closure=None):
 
-        self.optim.step()
+        self.optim.step(closure)
 
         self._counter += 1
         if self._counter % self.frequency == 0:
