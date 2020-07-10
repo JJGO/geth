@@ -63,9 +63,30 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
                 self.val_dataset, shuffle=False, **dataloader_kwargs
             )
 
-    def build_model(self, model, weights=None, ddp=False, **model_kwargs):
-        super().build_model(model, weights=weights, **model_kwargs)
+    def build_model(self, model, ddp=False, **model_kwargs):
+        """
+        Initialize resnet50 similarly to "ImageNet in 1hr" paper
+          - Batch norm moving average "momentum" <-- 0.9
+          - Fully connected layer <-- Gaussian weights (mean=0, std=0.01)
+          - gamma of last Batch norm layer of each residual block <-- 0
+        """
+        super().build_model(model, **model_kwargs)
         self.ddp = ddp
+
+        if isinstance(self.model, torchvision.models.ResNet):
+            for m in self.model.modules():
+                if isinstance(m, torchvision.models.resnet.BasicBlock):
+                    num_features = m.bn2.num_features
+                    m.bn2.weight = nn.Parameter(torch.zeros(num_features))
+                if isinstance(m, torchvision.models.resnet.Bottleneck):
+                    num_features = m.bn3.num_features
+                    m.bn3.weight = nn.Parameter(torch.zeros(num_features))
+
+                # Linear layers are initialized by drawing weights from a
+                # zero-mean Gaussian with stddev 0.01. In the paper it was only for
+                # fc layer, but in practice this seems to give better accuracy
+                if isinstance(m, nn.Linear):
+                    m.weight.data.normal_(0, 0.01)
 
     def checkpoint(self, tag=None):
         # Only master worker should checkpoint since all models are synchronized
