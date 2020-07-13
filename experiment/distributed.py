@@ -55,13 +55,18 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
                 num_replicas=self.env["num_tasks"],
                 rank=self.env["global_rank"],
             )
+            shuffle = None
+        else:
+            train_sampler = None
+            shuffle = True
 
-            self.train_dl = DataLoader(
-                self.train_dataset, sampler=train_sampler, **dataloader_kwargs
-            )
-            self.val_dl = DataLoader(
-                self.val_dataset, shuffle=False, **dataloader_kwargs
-            )
+        self.train_dl = DataLoader(
+            self.train_dataset,
+            shuffle=shuffle,
+            sampler=train_sampler,
+            **dataloader_kwargs,
+        )
+        self.val_dl = DataLoader(self.val_dataset, shuffle=False, **dataloader_kwargs)
 
     def build_model(self, model, ddp=False, **model_kwargs):
         """
