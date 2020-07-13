@@ -61,3 +61,11 @@ class LocalOptim(Optimizer):
     def load_state_dict(self, state_dict):
         self.frequency = state_dict.get("frequency", 1)
         self.optim.load_state_dict(state_dict)
+
+    @property
+    def param_groups(self):
+        return self.optim.param_groups
+
+    @property
+    def defaults(self):
+        return self.optim.defaults
