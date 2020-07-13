@@ -128,9 +128,13 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
             self.checkpoint(tag=f"{epoch:03d}")
             self.log(epoch=epoch)
             self.train(epoch)
+
             if isinstance(self.optim, optim.LocalOptim):
                 self.optim.avg_parameters()
             self.eval(epoch)
+
+            if self.scheduler:
+                self.scheduler.step()
 
             with torch.no_grad():
                 for cb in self.epoch_callbacks:
