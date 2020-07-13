@@ -145,15 +145,19 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
 
 
 class ResumeLocalDTE(DistributedTrainExperiment):
-    def __init__(self, sync_model_path=None, frequency=None, path=None, env=None):
+    def __init__(
+        self, sync_model_path=None, frequency=None, lr=None, path=None, env=None
+    ):
         if path is None:
             self.sync_model_path = pathlib.Path(sync_model_path)
             with (self.sync_model_path / "config.yml").open("r") as f:
                 cfg = yaml.load(f, Loader=yaml.FullLoader)
 
-            cfg["train"]["frequency"] = frequency
+            cfg["train"]["optim"]["frequency"] = frequency
             cfg["train"]["sync_model"] = sync_model_path
             cfg["experiment"]["type"] = self.__class__.__name__
+            if lr is not None:
+                cfg["train"]["optim"]["lr"] = lr
             super().__init__(**cfg, env=env)
         else:
             super().__init__(path=path, env=env)
@@ -178,6 +182,7 @@ class ResumeLocalDTE(DistributedTrainExperiment):
             printc(f"Start epoch {epoch}", color="YELLOW")
             self._epoch = epoch
             self.sync_before_epoch()
+            self.checkpoint(tag="last")
             self.reload(f"{epoch:03d}-sync")
             self.prepare_optim()
             self.log(epoch=epoch)
@@ -200,4 +205,4 @@ class ResumeLocalDTE(DistributedTrainExperiment):
         assert (
             self.optim.frequency == 1
         ), f"Loaded LocalOptim must have frequency 1, found {self.optim.frequency}"
-        self.optim.frequency = self.get_param("train.frequency")
+        self.optim.frequency = self.get_param("train.optim.frequency")
