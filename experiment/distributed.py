@@ -11,6 +11,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from pylot.experiment import VisionClassificationTrainExperiment as VCTE, Experiment
+from pylot.scheduler import WarmupScheduler
 from pylot.util import printc
 
 from .. import optim
@@ -130,7 +131,7 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
             self.train(epoch)
 
             if isinstance(self.optim, optim.LocalOptim):
-                self.optim.avg_parameters()
+                self.optim.synchronize()
             self.eval(epoch)
 
             if self.scheduler:
@@ -188,7 +189,7 @@ class ResumeLocalDTE(DistributedTrainExperiment):
             self.log(epoch=epoch)
             self.train(epoch)
             if isinstance(self.optim, optim.LocalOptim):
-                self.optim.avg_parameters()
+                self.optim.synchronize()
             self.eval(epoch)
             self.checkpoint(tag=f"{epoch+1:03d}-local")
 

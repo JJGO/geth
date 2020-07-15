@@ -8,7 +8,9 @@ from ..comm import communicate
 
 
 class LocalOptim(Optimizer):
-    def __init__(self, params, inner_optim, frequency=1, **kwargs):
+    def __init__(
+        self, params, inner_optim, frequency=1, momentum_buffer="local", **kwargs
+    ):
         if isinstance(inner_optim, str):
             inner_optim = getattr(torch.optim, inner_optim)(params, **kwargs)
         assert isinstance(inner_optim, Optimizer)
@@ -16,6 +18,16 @@ class LocalOptim(Optimizer):
         self.optim = inner_optim
         self.frequency = frequency
         self._counter = 0
+        self.momentum_buffer = momentum_buffer
+
+        assert momentum_buffer in (
+            "local",
+            "sync",
+            "zero",
+        ), f"Momentum buffer parameter must be one of: local, sync or zero"
+        if momentum_buffer == "sync":
+            assert isinstance(inner_optim, torch.optim.SGD)
+            # TODO: other momentum optimizers?
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -25,13 +37,22 @@ class LocalOptim(Optimizer):
         self._counter += 1
         if self._counter % self.frequency == 0:
             self._counter = 0
-            self.avg_parameters()
+            self.synchronize()
 
-    def avg_parameters(self):
+    def synchronize(self):
+        self.avg_parameters()
+        if self.momentum_buffer == "sync":
+            self.avg_parameters("momentum")
+        elif self.momentum_buffer == "zero":
+            for pg in self.optim.param_groups:
+                # Zero out momentum buffers
+                pg["momentum"] *= 0.0
+
+    def avg_parameters(self, kind="params"):
         params = []
         world_size = dist.get_world_size()  # Get world size
         for group in self.optim.param_groups:
-            for p in group["params"]:
+            for p in group[kind]:
                 p.data.div_(world_size)
                 params.append(p.data)
         communicate(params, dist.all_reduce)
