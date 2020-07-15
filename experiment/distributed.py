@@ -147,7 +147,7 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
 
 class ResumeLocalDTE(DistributedTrainExperiment):
     def __init__(
-        self, sync_model_path=None, frequency=None, lr=None, path=None, env=None
+        self, sync_model_path=None, frequency=None, rescale_lr=None, path=None, env=None
     ):
         if path is None:
             self.sync_model_path = pathlib.Path(sync_model_path)
@@ -157,13 +157,14 @@ class ResumeLocalDTE(DistributedTrainExperiment):
             cfg["train"]["optim"]["frequency"] = frequency
             cfg["train"]["sync_model"] = sync_model_path
             cfg["experiment"]["type"] = self.__class__.__name__
-            if lr is not None:
-                cfg["train"]["optim"]["lr"] = lr
+            if rescale_lr is not None:
+                # Should be rescaled down by world size
+                cfg["train"]["rescale_lr"] = rescale_lr
             super().__init__(**cfg, env=env)
         else:
             super().__init__(path=path, env=env)
 
-    def build_train(self, sync_model, optim, epochs, **optim_kwargs):
+    def build_train(self, sync_model, optim, epochs, rescale_lr=None, **optim_kwargs):
         # Takes a model to use the epoch weights from
         # It then symlinks the synced parent checkpoints so they can be loaded
         super().build_train(optim, epochs, **optim_kwargs)
@@ -207,3 +208,14 @@ class ResumeLocalDTE(DistributedTrainExperiment):
             self.optim.frequency == 1
         ), f"Loaded LocalOptim must have frequency 1, found {self.optim.frequency}"
         self.optim.frequency = self.get_param("train.optim.frequency")
+
+        if self.get_param("train.rescale_lr", False):
+            rescale_lr = self.get_param("train.rescale_lr")
+
+            for pg in self.optim.param_groups:
+                pg["lr"] /= rescale_lr
+
+            if isinstance(self.scheduler, WarmupScheduler):
+                self.scheduler.target_lrs = [
+                    lr / rescale_lr for lr in self.scheduler.target_lrs
+                ]
