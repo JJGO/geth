@@ -144,10 +144,27 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
             self.dump_logs()
         self.checkpoint(tag=f"{end:03d}")
 
+    def rescale_lr(self, factor):
+
+        printc(f"Rescaling LR by {factor}", color="ORANGE")
+
+        for pg in self.optim.param_groups:
+            pg["lr"] /= factor
+
+        if isinstance(self.scheduler, WarmupScheduler):
+            self.scheduler.target_lrs = [
+                lr / factor for lr in self.scheduler.target_lrs
+            ]
 
 class ResumeLocalDTE(DistributedTrainExperiment):
     def __init__(
-        self, sync_model_path=None, frequency=None, rescale_lr=None, path=None, env=None
+        self,
+        sync_model_path=None,
+        frequency=None,
+        rescale_lr=None,
+        momentum_buffer="local",
+        path=None,
+        env=None,
     ):
         if path is None:
             self.sync_model_path = pathlib.Path(sync_model_path)
@@ -160,6 +177,7 @@ class ResumeLocalDTE(DistributedTrainExperiment):
             if rescale_lr is not None:
                 # Should be rescaled down by world size
                 cfg["train"]["rescale_lr"] = rescale_lr
+            cfg["train"]["optim"]["momentum_buffer"] = momentum_buffer
             super().__init__(**cfg, env=env)
         else:
             super().__init__(path=path, env=env)
@@ -208,14 +226,9 @@ class ResumeLocalDTE(DistributedTrainExperiment):
             self.optim.frequency == 1
         ), f"Loaded LocalOptim must have frequency 1, found {self.optim.frequency}"
         self.optim.frequency = self.get_param("train.optim.frequency")
+        self.optim.momentum_buffer = self.get_param(
+            "train.optim.momentum_buffer", "local"
+        )
 
         if self.get_param("train.rescale_lr", False):
-            rescale_lr = self.get_param("train.rescale_lr")
-
-            for pg in self.optim.param_groups:
-                pg["lr"] /= rescale_lr
-
-            if isinstance(self.scheduler, WarmupScheduler):
-                self.scheduler.target_lrs = [
-                    lr / rescale_lr for lr in self.scheduler.target_lrs
-                ]
+            self.rescale_lr(self.get_param("train.rescale_lr"))
