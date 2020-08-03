@@ -42,7 +42,7 @@ class LocalOptim(Optimizer):
     def synchronize(self):
         self.avg_parameters()
         if self.momentum_buffer == "sync":
-            self.avg_parameters("momentum")
+            self.avg_parameters("momentum_buffer")
         elif self.momentum_buffer == "zero":
             for pg in self.optim.param_groups:
                 # Zero out momentum buffers
@@ -52,9 +52,16 @@ class LocalOptim(Optimizer):
         params = []
         world_size = dist.get_world_size()  # Get world size
         for group in self.optim.param_groups:
-            for p in group[kind]:
-                p.data.div_(world_size)
-                params.append(p.data)
+            for p in group["params"]:
+                if kind == "params":
+                    p.data.div_(world_size)
+                    params.append(p.data)
+                elif kind == "momentum_buffer":
+                    param_state = self.optim.state[p]
+                    if "momentum_buffer" in param_state:
+                        buf = param_state["momentum_buffer"]
+                        buf.data.div_(world_size)
+                        params.append(buf.data)
         communicate(params, dist.all_reduce)
 
     def set_frequency(self, frequency):
