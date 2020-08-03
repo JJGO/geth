@@ -156,6 +156,56 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
                 lr / factor for lr in self.scheduler.target_lrs
             ]
 
+
+class PostLocalDTE(DistributedTrainExperiment):
+    def build_train(self, optim, epochs, switch_local, rescale_lr=None, **optim_kwargs):
+        super().build_train(optim, epochs, **optim_kwargs)
+
+    # TODO Make resume from checkpointing works properly
+    # Main issue is that for large frequency models synchronize less often than an epoch
+    def run_epochs(self, start=0, end=None):
+        end = self.epochs if end is None else end
+        switch_local = self.get_param("train.switch_local")
+        frequency = self.get_param("train.optim.frequency")
+        assert isinstance(self.optim, optim.LocalOptim)
+
+        if start == 0:
+            self.optim.set_frequency(1)
+            printc("Starting training, resetting frequency to 1", color="ORANGE")
+
+        for epoch in range(start, end):
+            printc(f"Start epoch {epoch}", color="YELLOW")
+            self._epoch = epoch
+            self.sync_before_epoch()
+            if epoch == switch_local:
+                self.optim.set_frequency(frequency)
+                printc(
+                    f"Reached epoch {switch_local}, setting frequency to {frequency}",
+                    color="ORANGE",
+                )
+                if self.get_param("train.rescale_lr", False):
+                    self.rescale_lr(self.get_param("train.rescale_lr"))
+
+            self.checkpoint(tag="last")
+            self.log(epoch=epoch)
+            self.train(epoch)
+
+            # TODO - related to top TODO. Forcing sync, makes checkpointing work
+            # But breaks the actual frequency of updates
+            # if isinstance(self.optim, optim.LocalOptim):
+            #     self.optim.synchronize()
+            self.eval(epoch)
+
+            if self.scheduler:
+                self.scheduler.step()
+
+            with torch.no_grad():
+                for cb in self.epoch_callbacks:
+                    cb(epoch)
+
+            self.dump_logs()
+
+
 class ResumeLocalDTE(DistributedTrainExperiment):
     def __init__(
         self,
