@@ -170,8 +170,13 @@ class PostLocalDTE(DistributedTrainExperiment):
     def build_train(self, optim, epochs, switch_local, rescale_lr=None, **optim_kwargs):
         super().build_train(optim, epochs, **optim_kwargs)
 
-    # TODO Make resume from checkpointing works properly
-    # Main issue is that for large frequency models synchronize less often than an epoch
+    @property
+    def checkpoint_path(self):
+        return self.path / "checkpoints"
+
+    def checkpoint(self, tag=None):
+        VCTE.checkpoint(self, tag=tag)
+
     def run_epochs(self, start=0, end=None):
         end = self.epochs if end is None else end
         switch_local = self.get_param("train.switch_local")
