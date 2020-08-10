@@ -31,6 +31,15 @@ class DistributedExperiment(Experiment):
     def is_master(self):
         return self.env["global_rank"] == 0
 
+    def build_logging(self):
+        super().build_logging()
+
+        if self.is_master:
+            dst = self.parent_path / "logs.csv"
+            if not dst.exists():
+                src = self.path / "logs.csv"
+                dst.symlink_to(src)
+
 
 class DistributedTrainExperiment(VCTE, DistributedExperiment):
 
