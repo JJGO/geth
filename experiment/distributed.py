@@ -106,7 +106,7 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
     def checkpoint(self, tag=None):
         # Only master worker should checkpoint since all models are synchronized
         # at the epoch boundary
-        if self.env["global_rank"] == 0:
+        if self.is_master:
             super().checkpoint(tag=tag)
 
     def to_device(self):
