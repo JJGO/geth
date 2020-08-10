@@ -203,11 +203,6 @@ class PostLocalDTE(DistributedTrainExperiment):
             self.checkpoint(tag="last")
             self.log(epoch=epoch)
             self.train(epoch)
-
-            # TODO - related to top TODO. Forcing sync, makes checkpointing work
-            # But breaks the actual frequency of updates
-            # if isinstance(self.optim, optim.LocalOptim):
-            #     self.optim.synchronize()
             self.eval(epoch)
 
             if self.scheduler:
@@ -218,6 +213,16 @@ class PostLocalDTE(DistributedTrainExperiment):
                     cb(epoch)
 
             self.dump_logs()
+
+    def eval(self, epoch=0):
+        # TODO: Use last synchronization instead
+        self.checkpoint(tag="eval")
+        self.optim.synchronize()
+        if self.is_master:
+            super().eval(epoch)
+        self.reload(tag="eval")
+        # self.load_model(self.checkpoint_path / "eval.pt")
+        (self.checkpoint_path / "eval.pt").unlink()
 
 
 class ResumeLocalDTE(DistributedTrainExperiment):
