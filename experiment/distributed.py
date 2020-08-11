@@ -10,10 +10,12 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+import pylot
 from pylot.experiment import VisionClassificationTrainExperiment as VCTE, Experiment
 from pylot.scheduler import WarmupScheduler
 from pylot.util import printc
 
+from .. import callbacks
 from .. import optim
 
 
@@ -44,6 +46,7 @@ class DistributedExperiment(Experiment):
 class DistributedTrainExperiment(VCTE, DistributedExperiment):
 
     OPTIMS = [torch.optim, optim]
+    CALLBACKS = [pylot.callbacks, callbacks]
 
     def __init__(self, env=None, **kwargs):
         DistributedExperiment.__init__(self, env=env, **kwargs)
