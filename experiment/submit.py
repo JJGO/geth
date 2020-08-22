@@ -187,7 +187,7 @@ def submit_experiment(experiment, cfg, cluster_params=None, local=False):
 
 def batch_submit_experiments(experiments, batch, cluster_params=None):
 
-    executor = get_executor(local=True, batch=batch)
+    executor = get_executor(local=False, batch=batch)
 
     submissions = []
     _cluster_params = None
