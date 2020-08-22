@@ -7,72 +7,93 @@ from scipy.spatial.distance import cosine
 import torch
 import torch.distributed as dist
 
-from pylot.util import CSVLogger
+from pylot.util import CSVLogger, printc
 
-# fmt: off
-def SynchronizationAnalysis(exp):
+
+def SynchronizationAnalysis(exp, samples=5):
 
     if exp.is_master:
         logger = CSVLogger(exp.parent_path / "analysis.csv")
 
-    def SynchronizationAnalysisCallback(epoch, iteration, postfix):
+    def SynchronizationAnalysisCallback(train, epoch, iteration, postfix):
+        if not train:
+            return
+        # printc(f"Analysis Callback @ {epoch}.{iteration}", color='RED')
         exp.checkpoint(tag="tmp")
         tmp = exp.checkpoint_path / "tmp.pt"
         tmp_grad = exp.checkpoint_path / "tmp-grad.pt"
 
+        # printc("Made temp checkpoints", color='RED')
+
         with torch.set_grad_enabled(True):
-            for x, y in exp.val_dl:
+            for x, y in itertools.islice(exp.val_dl, samples):
                 x, y = x.to(exp.device), y.to(exp.device)
                 yhat = exp.model(x)
                 loss = exp.loss_func(yhat, y)
                 loss.backward()
 
+        # printc("Ran eval", color="RED")
+
         grads = {name: tensor.grad for name, tensor in exp.model.named_parameters()}
         torch.save(grads, tmp_grad)
         exp.optim.zero_grad()
 
+        # printc("Computed grads, waiting for group", color='RED')
+
         dist.barrier()
 
         if exp.is_master:
+            # printc(f"I'm master, loading weights, grads", color='GREEN')
             N = exp.get_param("distributed.world_size")
 
-            weights = [torch.load(exp.parent_path / f"{i}/checkpoints/tmp.pt")["model_state_dict"] for i in range(N)]
-            grads = [torch.load(exp.parent_path / f"{i}/checkpoints/tmp-grad.pt") for i in range(N)]
+            state = {}
+            state["weights"] = [
+                torch.load(exp.parent_path / f"{i}/checkpoints/tmp.pt")[
+                    "model_state_dict"
+                ]
+                for i in range(N)
+            ]
+            state["grads"] = [
+                torch.load(exp.parent_path / f"{i}/checkpoints/tmp-grad.pt")
+                for i in range(N)
+            ]
 
-            weights = {param: np.array([weights[i][param].detach().cpu().numpy() for i in range(N)]) for param in weights[0]}
-            grads = {param: np.array([grads[i][param].detach().cpu().numpy() for i in range(N)]) for param in grads[0]}
+            for param in state["grads"][0]:
 
-            for param in weights:
-                cv_param = variation(weights[param], axis=0)
-                cos_param = [cosine(w1.flatten(), w2.flatten()) for w1, w2 in itertools.combinations(weights[param], 2)]
-                if param in grads:
-                    cv_grad = variation(grads[param], axis=0)
-                    cos_grad = [cosine(g1.flatten(), g2.flatten()) for g1, g2 in itertools.combinations(grads[param], 2)]
+                dists = {}
 
-                logger.set(
-                    epoch=epoch,
-                    iteration=iteration,
-                    param=param,
-                    cv_param_mean=cv_param.mean(),
-                    cv_param_std=cv_param.std(),
-                    cv_grad_mean=cv_grad.mean(),
-                    cv_grad_std=cv_grad.std(),
-                )
+                values = {
+                    s: [state[s][i][param].detach().cpu().numpy() for i in range(N)]
+                    for s in ("weights", "grads")
+                }
 
-                if param in grads:
-                    logger.set(
-                        cos_param_mean=np.mean(cos_param),
-                        cos_param_std=np.std(cos_param),
-                        cos_grad_mean=np.mean(cos_grad),
-                        cos_grad_std=np.std(cos_grad)
-                    )
+                for s in values:
 
-            logger.flush()
+                    dists[f"{s}_cos"] = [
+                        cosine(x1.flatten(), x2.flatten())
+                        for x1, x2 in itertools.combinations(values[s], 2)
+                    ]
+
+                    mean = np.mean(values[s], axis=0)
+
+                    dists[f"{s}_l1"] = [
+                        np.linalg.norm((x - mean).flatten(), ord=1) for x in values[s]
+                    ]
+                    dists[f"{s}_l2"] = [
+                        np.linalg.norm((x - mean).flatten(), ord=2) for x in values[s]
+                    ]
+
+                    for k in list(dists.keys()):
+                        dists[f"{k}_mean"] = np.mean(dists[k])
+                        dists[f"{k}_std"] = np.std(dists[k])
+
+                    dists[f"{s}_mean"] = mean.mean()
+
+                logger.set(epoch=epoch, iteration=iteration, param=param, **dists)
+                logger.flush()
 
         dist.barrier()
         tmp.unlink()
         tmp_grad.unlink()
 
     return SynchronizationAnalysisCallback
-
-# fmt: on
