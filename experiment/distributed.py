@@ -38,10 +38,11 @@ class DistributedExperiment(Experiment):
         super().build_logging()
 
         if self.is_master:
-            dst = self.parent_path / "logs.csv"
-            if not dst.exists():
-                src = self.path / "logs.csv"
-                dst.symlink_to(src)
+            for i in ("checkpoints", "logs.csv"):
+                dst = self.parent_path / i
+                if not dst.exists():
+                    # src = self.path / "logs.csv" # ! Bad because it's an absolute symlink
+                    dst.symlink_to(f"0/{i}")
 
 
 class DistributedTrainExperiment(VCTE, DistributedExperiment):
@@ -142,7 +143,7 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
             self._epoch = epoch
             self.sync_before_epoch()
             self.checkpoint(tag="last")
-            self.checkpoint(tag=f"{epoch:03d}")
+            # self.checkpoint(tag=f"{epoch:03d}")
             self.log(epoch=epoch)
             self.train(epoch)
 
