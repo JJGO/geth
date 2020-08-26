@@ -2,8 +2,8 @@ import pathlib
 import yaml
 
 import torch
-import torchvision.models
 from torch import nn
+from torchvision.models import resnet
 
 import torch.distributed as dist
 from torch.utils.data import DataLoader
@@ -13,7 +13,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import pylot
 from pylot.experiment import VisionClassificationTrainExperiment as VCTE, Experiment
 from pylot.scheduler import WarmupScheduler
-from pylot.util import printc
+from pylot.util import printc, dict_recursive_update
+from pylot.models.vision import cifar_resnet
 
 from .. import callbacks
 from .. import optim
@@ -91,12 +92,15 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
         super().build_model(model, **model_kwargs)
         self.ddp = ddp
 
-        if isinstance(self.model, torchvision.models.ResNet):
+        if isinstance(self.model, (resnet.ResNet, cifar_resnet.ResNet)):
+            # Distributed training uses 4 tricks to maintain accuracy with much larger
+            # batch sizes. See https://arxiv.org/pdf/1706.02677.pdf for more details
             for m in self.model.modules():
-                if isinstance(m, torchvision.models.resnet.BasicBlock):
+                # The last BatchNorm layer in each block needs to be initialized as zero gamma
+                if isinstance(m, (resnet.BasicBlock, cifar_resnet.BasicBlock)):
                     num_features = m.bn2.num_features
                     m.bn2.weight = nn.Parameter(torch.zeros(num_features))
-                if isinstance(m, torchvision.models.resnet.Bottleneck):
+                if isinstance(m, resnet.Bottleneck):
                     num_features = m.bn3.num_features
                     m.bn3.weight = nn.Parameter(torch.zeros(num_features))
 
