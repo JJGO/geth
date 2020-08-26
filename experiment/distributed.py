@@ -1,6 +1,8 @@
 import pathlib
 import yaml
 
+import pandas as pd
+
 import torch
 from torch import nn
 from torchvision.models import resnet
@@ -231,6 +233,63 @@ class PostLocalDTE(DistributedTrainExperiment):
         self.reload(tag="eval")
         # self.load_model(self.checkpoint_path / "eval.pt")
         (self.checkpoint_path / "eval.pt").unlink()
+
+
+class PartialPostLocalDTE(PostLocalDTE):
+    def __init__(
+        self,
+        base_exp=None,
+        switch_local=None,
+        frequency=None,
+        momentum_buffer="zero",
+        path=None,
+        env=None,
+        **kwargs,
+    ):
+        if path is not None:
+            assert env is not None, "env must be specified on distributed execution"
+            super.__init__(path=path, env=env)
+        else:
+            assert frequency is not None, "frequency must be specified"
+            assert switch_local is not None, "switch_local must be specified"
+            base_exp = pathlib.Path(base_exp)
+            # Read Base Experiment config
+            with (base_exp / "config.yml").open("r") as f:
+                cfg = yaml.load(f, Loader=yaml.FullLoader)
+
+            # LocalOptim preparations
+            cfg["train"]["switch_local"] = switch_local
+            cfg["train"]["optim"]["frequency"] = frequency
+            cfg["train"]["optim"]["momentum_buffer"] = momentum_buffer
+            if cfg["train"]["optim"]["optim"] != "LocalOptim":
+                cfg["train"]["optim"]["inner_optim"] = cfg["train"]["optim"]["optim"]
+                cfg["train"]["optim"]["optim"] = "LocalOptim"
+
+            if kwargs:
+                # For any other change like log.root, train.epochs, &c
+                cfg = dict_recursive_update(cfg, kwargs)
+
+            # Need to init experiment so .path exists
+            super().__init__(**cfg, env=env)
+
+            # Setup Last Checkpoint by symlinking from base experiment
+            # Neat thing is that the checkpoint will have the epoch so
+            # it's harder to shoot yourself in the foot.
+
+            checkpoint_path = base_exp / "checkpoints"  # load checkpoint from master
+
+            # Reminder that checkpoint callback tags with epoch number at the end of the epoch
+            last = checkpoint_path / f"{switch_local-1:03d}.pt"
+            assert last.exists(), f"Could not find {last}"
+
+            self.checkpoint_path.mkdir(parents=True, exist_ok=True)
+            (self.checkpoint_path / "last.pt").symlink_to(last)
+
+            # Copy logs over
+            df = pd.read_csv((base_exp / "logs.csv").as_posix())
+            df = df[df.epoch < switch_local]
+            (self.path / "0").mkdir(parents=True, exist_ok=True)
+            df.to_csv(self.path / "0/logs.csv", index=False)
 
 
 class ResumeLocalDTE(DistributedTrainExperiment):
