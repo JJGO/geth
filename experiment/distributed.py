@@ -1,4 +1,5 @@
 import pathlib
+import shutil
 import yaml
 
 import pandas as pd
@@ -272,24 +273,32 @@ class PartialPostLocalDTE(PostLocalDTE):
             # Need to init experiment so .path exists
             super().__init__(**cfg, env=env)
 
-            # Setup Last Checkpoint by symlinking from base experiment
+            # Setup Last Checkpoint by copying from base experiment
             # Neat thing is that the checkpoint will have the epoch so
             # it's harder to shoot yourself in the foot.
 
             checkpoint_path = base_exp / "checkpoints"  # load checkpoint from master
 
             # Reminder that checkpoint callback tags with epoch number at the end of the epoch
-            last = checkpoint_path / f"{switch_local-1:03d}.pt"
+            last = checkpoint_path / f"{switch_local:03d}.pt"
             assert last.exists(), f"Could not find {last}"
 
-            self.checkpoint_path.mkdir(parents=True, exist_ok=True)
-            (self.checkpoint_path / "last.pt").symlink_to(last)
+            N = self.get_param("distributed.world_size")
+            for i in range(N):
+                checkpoint_path = self.path / f"{i}/checkpoints"
+                checkpoint_path.mkdir(parents=True, exist_ok=True)
+                shutil.copy(last, checkpoint_path / "last.pt")
 
             # Copy logs over
             df = pd.read_csv((base_exp / "logs.csv").as_posix())
             df = df[df.epoch < switch_local]
             (self.path / "0").mkdir(parents=True, exist_ok=True)
             df.to_csv(self.path / "0/logs.csv", index=False)
+
+    # # FIXME Fix this ugly thing because of callback at end
+    # def load(self, tag=None):
+    #     super().load(tag=tag)
+    #     self._epoch += 1
 
 
 class ResumeLocalDTE(DistributedTrainExperiment):
