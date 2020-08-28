@@ -1,7 +1,12 @@
+import os
+
+# PyTorch 1.5 specific issue: https://github.com/pytorch/pytorch/issues/37377
+# if torch.__version__ >= "1.5.0":
+os.environ["MKL_THREADING_LAYER"] = "GNU"  # Workaround
+
 import collections
 import math
 import pathlib
-import os
 import yaml
 
 import torch
@@ -10,11 +15,6 @@ import submitit
 
 from pylot.util import printc, setup_colored_traceback
 from geth.experiment import DistributedExperiment
-
-
-# PyTorch 1.5 specific issue: https://github.com/pytorch/pytorch/issues/37377
-if torch.__version__ == "1.5.0":
-    os.environ["MKL_THREADING_LAYER"] = "GNU"  # Workaround
 
 
 DEFAULT_CLUSTER_PARAMS = dict(
@@ -37,6 +37,9 @@ class CheckpointWrapper:
         # This makes looking at errors much nicer
         setup_colored_traceback()
 
+        # from torch.utils.collect_env import get_pretty_env_info
+        # print(get_pretty_env_info())
+
         # Log cluster params
         cp_str = ("\n" + yaml.dump(self.cluster_params)).replace("\n", "\n\t")
         printc("Running with cluster params" + cp_str, color="CYAN")
@@ -45,14 +48,16 @@ class CheckpointWrapper:
             self.distributed_setup()
             kwargs["env"] = self.distributed
 
-        self.experiment = self.experiment_class(**kwargs)
-        self.save_cluster_params()
+        with torch.cuda.device(self.distributed["local_rank"]):
 
-        if not self.experiment.path.exists():
-            self.experiment.run()
-        else:
-            self.experiment.load()
-            self.experiment.resume()
+            self.experiment = self.experiment_class(**kwargs)
+            self.save_cluster_params()
+
+            if not self.experiment.path.exists():
+                self.experiment.run()
+            else:
+                self.experiment.load()
+                self.experiment.resume()
 
     def distributed_setup(self):
         job_env = submitit.JobEnvironment()
@@ -68,7 +73,7 @@ class CheckpointWrapper:
             backend="nccl",
         )
         # GPU isolation
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(job_env.local_rank)
+        # os.environ["CUDA_VISIBLE_DEVICES"] = str(job_env.local_rank)
 
     def checkpoint(self, **_):
         printc("SubmitIt checkpoint", color="ORANGE")
