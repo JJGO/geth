@@ -213,6 +213,7 @@ class PostLocalDTE(DistributedTrainExperiment):
 
             self.checkpoint(tag="last")
             self.log(epoch=epoch)
+            self.log(frequency=self.optim.frequency)
             self.train(epoch)
             self.eval(epoch)
 
