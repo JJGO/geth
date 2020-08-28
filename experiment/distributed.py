@@ -250,7 +250,7 @@ class PartialPostLocalDTE(PostLocalDTE):
     ):
         if path is not None:
             assert env is not None, "env must be specified on distributed execution"
-            super.__init__(path=path, env=env)
+            super().__init__(path=path, env=env)
         else:
             assert frequency is not None, "frequency must be specified"
             assert switch_local is not None, "switch_local must be specified"
