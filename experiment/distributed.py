@@ -178,8 +178,28 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
 
 
 class PostLocalDTE(DistributedTrainExperiment):
-    def build_train(self, optim, epochs, switch_local, rescale_lr=None, **optim_kwargs):
+    def build_train(
+        self,
+        optim,
+        epochs,
+        switch_local=None,
+        rescale_lr=None,
+        freq_switch=None,
+        **optim_kwargs,
+    ):
+
+        assert (switch_local is None) ^ (
+            freq_switch is None
+        ), "Either switch_local or freq_switch must be specified"
+        assert (switch_local is None) == (
+            self.get_param("train.optim.frequency", None) is None
+        ), "With switch_local the frequency must be specified, otherwise it shouldn't be"
         super().build_train(optim, epochs, **optim_kwargs)
+
+        self.freq_switch = freq_switch
+        if switch_local is not None:
+            # Backwards compatibility
+            self.freq_switch = {switch_local: self.get_param("train.optim.frequency")}
 
     @property
     def checkpoint_path(self):
@@ -190,8 +210,6 @@ class PostLocalDTE(DistributedTrainExperiment):
 
     def run_epochs(self, start=0, end=None):
         end = self.epochs if end is None else end
-        switch_local = self.get_param("train.switch_local")
-        frequency = self.get_param("train.optim.frequency")
         assert isinstance(self.optim, optim.LocalOptim)
 
         if start == 0:
@@ -202,11 +220,12 @@ class PostLocalDTE(DistributedTrainExperiment):
             printc(f"Start epoch {epoch}", color="YELLOW")
             self._epoch = epoch
             self.sync_before_epoch()
-            if epoch == switch_local:
+            if epoch in self.freq_switch:
+                frequency = self.freq_switch[epoch]
                 self.optim.set_frequency(frequency)
                 printc(
-                    f"Reached epoch {switch_local}, setting frequency to {frequency}",
-                    color="ORANGE",
+                    f"Reached epoch {epoch}, setting frequency to {frequency}",
+                    color="CYAN",
                 )
                 if self.get_param("train.rescale_lr", False):
                     self.rescale_lr(self.get_param("train.rescale_lr"))
@@ -242,6 +261,7 @@ class PartialPostLocalDTE(PostLocalDTE):
         base_exp=None,
         switch_local=None,
         frequency=None,
+        freq_switch=None,
         momentum_buffer="zero",
         path=None,
         env=None,
