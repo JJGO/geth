@@ -196,10 +196,11 @@ class PostLocalDTE(DistributedTrainExperiment):
         ), "With switch_local the frequency must be specified, otherwise it shouldn't be"
         super().build_train(optim, epochs, **optim_kwargs)
 
-        self.freq_switch = freq_switch
         if switch_local is not None:
             # Backwards compatibility
             self.freq_switch = {switch_local: self.get_param("train.optim.frequency")}
+        else:
+            self.freq_switch = dict(freq_switch)
 
     @property
     def checkpoint_path(self):
