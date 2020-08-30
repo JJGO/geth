@@ -144,6 +144,7 @@ def prepare_dist_experiment(experiment, cfg, cluster_params=None):
     # DistributedExperiments need to be instantiated so the
     # path (UID) is known to all replicas and is not randomized
     exp = experiment(**cfg)
+    print(f"Initialized experiment at {exp.path}")
     # Infer correct cluster params for the experiment given the world_size
     _cluster_params.update(auto_dist_params(exp.get_param("distributed.world_size")))
     # Update other cluster params like timeout
@@ -187,6 +188,7 @@ def submit_experiment(experiment, cfg, cluster_params=None, local=False):
 
     executor.update_parameters(**cluster_params)
     job = executor.submit(submit, **kwargs)
+    print(f"Submitted job {job.job_id}")
     return job
 
 

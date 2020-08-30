@@ -6,12 +6,12 @@ import pandas as pd
 
 import torch
 from torch import nn
-from torchvision.models import resnet
-
 import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+from torchvision.models import resnet
 
 import pylot
 from pylot.experiment import VisionClassificationTrainExperiment as VCTE, Experiment
@@ -227,7 +227,6 @@ class PostLocalDTE(DistributedTrainExperiment):
             self.dump_logs()
 
     def eval(self, epoch=0):
-        # TODO: Use last synchronization instead
         self.checkpoint(tag="eval")
         self.optim.synchronize()
         if self.is_master:
@@ -275,8 +274,8 @@ class PartialPostLocalDTE(PostLocalDTE):
             super().__init__(**cfg, env=env)
 
             # Setup Last Checkpoint by copying from base experiment
-            # Neat thing is that the checkpoint will have the epoch so
-            # it's harder to shoot yourself in the foot.
+            # Neat thing is that the checkpoint will have the epoch in the .pt
+            # so it's harder to shoot yourself in the foot.
 
             checkpoint_path = base_exp / "checkpoints"  # load checkpoint from master
 
