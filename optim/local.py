@@ -43,10 +43,11 @@ class LocalOptim(Optimizer):
         self.avg_parameters()
 
         # Momentum Buffers
-        if self.frequency > 1:
-            if self.momentum_buffer == "sync":
-                self.avg_parameters("momentum_buffer")
-            elif self.momentum_buffer == "zero":
+        if self.momentum_buffer == "sync":
+            self.avg_parameters("momentum_buffer")
+
+        elif self.momentum_buffer == "zero":
+            if self.frequency > 1:
                 for pg in self.optim.param_groups:
                     # Zero out momentum buffers
                     pg["momentum"] *= 0.0
