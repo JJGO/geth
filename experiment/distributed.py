@@ -5,22 +5,20 @@ import yaml
 import pandas as pd
 
 import torch
-from torch import nn
 import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from torchvision.models import resnet
 
 import pylot
 from pylot.experiment import VisionClassificationTrainExperiment as VCTE, Experiment
 from pylot.scheduler import WarmupScheduler
 from pylot.util import printc, dict_recursive_update
-from pylot.models.vision import cifar_resnet
 
 from .. import callbacks
 from .. import optim
+from ..models.init import resnet_goyal_init
 
 
 class DistributedExperiment(Experiment):
@@ -86,33 +84,11 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
         )
         self.val_dl = DataLoader(self.val_dataset, shuffle=False, **dataloader_kwargs)
 
-    def build_model(self, model, ddp=False, **model_kwargs):
-        """
-        Initialize resnet50 similarly to "ImageNet in 1hr" paper
-          - Batch norm moving average "momentum" <-- 0.9
-          - Fully connected layer <-- Gaussian weights (mean=0, std=0.01)
-          - gamma of last Batch norm layer of each residual block <-- 0
-        """
+    def build_model(self, model, ddp=False, goyal_init=True, **model_kwargs):
         super().build_model(model, **model_kwargs)
         self.ddp = ddp
-
-        if isinstance(self.model, (resnet.ResNet, cifar_resnet.ResNet)):
-            # Distributed training uses 4 tricks to maintain accuracy with much larger
-            # batch sizes. See https://arxiv.org/pdf/1706.02677.pdf for more details
-            for m in self.model.modules():
-                # The last BatchNorm layer in each block needs to be initialized as zero gamma
-                if isinstance(m, (resnet.BasicBlock, cifar_resnet.BasicBlock)):
-                    num_features = m.bn2.num_features
-                    m.bn2.weight = nn.Parameter(torch.zeros(num_features))
-                if isinstance(m, resnet.Bottleneck):
-                    num_features = m.bn3.num_features
-                    m.bn3.weight = nn.Parameter(torch.zeros(num_features))
-
-                # Linear layers are initialized by drawing weights from a
-                # zero-mean Gaussian with stddev 0.01. In the paper it was only for
-                # fc layer, but in practice this seems to give better accuracy
-                if isinstance(m, nn.Linear):
-                    m.weight.data.normal_(0, 0.01)
+        if goyal_init:
+            resnet_goyal_init(self.model)
 
     def checkpoint(self, tag=None):
         # Only master worker should checkpoint since all models are synchronized
@@ -263,7 +239,7 @@ class PartialPostLocalDTE(PostLocalDTE):
         switch_local=None,
         frequency=None,
         freq_switch=None,
-        momentum_buffer="zero",
+        momentum_buffer="local",
         path=None,
         env=None,
         **kwargs,
