@@ -208,6 +208,8 @@ def batch_submit_experiments(experiments, batch, cluster_params=None):
                 _cluster_params == cl_ps
             ), "Found experiment with different cluster params"
 
+    # _cluster_params["gpus_per_node"] = f"volta:{_cluster_params['gpus_per_node']}"
+    _cluster_params["slurm_gres"] = f"gpu:volta:{_cluster_params.pop('gpus_per_node')}"
     executor.update_parameters(**_cluster_params)
 
     jobs = []
