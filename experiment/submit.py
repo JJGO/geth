@@ -66,9 +66,12 @@ class CheckpointWrapper:
         self.distributed = {k: getattr(job_env, k) for k in attrs}
         self.distributed["master"] = master_node
         # Init torch.distributed WORLD group
+        printc(f"Running with job_id: {job_env.job_id}", color='CYAN')
         port = 42000 + hash(job_env.job_id) % 10000
+        addr = f"tcp://{master_node}:{port}"
+        printc(f"Initializing dist group at {addr}", color="CYAN")
         dist.init_process_group(
-            init_method=f"tcp://{master_node}:{port}",
+            init_method=addr,
             rank=job_env.global_rank,
             world_size=job_env.num_tasks,
             backend="nccl",
