@@ -8,6 +8,7 @@ import collections
 import math
 import pathlib
 import yaml
+import hashlib
 
 import torch
 import torch.distributed as dist
@@ -26,6 +27,11 @@ DEFAULT_CLUSTER_PARAMS = dict(
     # nodes=1,
     slurm_mem="64G",
 )
+
+
+def deterministic_hash(s):
+    m = hashlib.md5(s.encode())
+    return int(m.hexdigest(), 16)
 
 
 class CheckpointWrapper:
@@ -66,8 +72,8 @@ class CheckpointWrapper:
         self.distributed = {k: getattr(job_env, k) for k in attrs}
         self.distributed["master"] = master_node
         # Init torch.distributed WORLD group
-        printc(f"Running with job_id: {job_env.job_id}", color='CYAN')
-        port = 42000 + hash(job_env.job_id) % 10000
+        printc(f"Running with job_id: {job_env.job_id}", color="CYAN")
+        port = 42000 + (deterministic_hash(job_env.job_id) % 10000)
         addr = f"tcp://{master_node}:{port}"
         printc(f"Initializing dist group at {addr}", color="CYAN")
         dist.init_process_group(
