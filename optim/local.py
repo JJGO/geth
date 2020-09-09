@@ -45,7 +45,7 @@ class LocalOptim(Optimizer):
 
         self.optim.step(closure)
 
-        if not sync_grads or self.frequency > 1:
+        if not self.sync_grads or self.frequency > 1:
             self._counter += 1
             if self._counter % self.frequency == 0:
                 self._counter = 0
