@@ -32,44 +32,51 @@ class LocalOptim(Optimizer):
     @torch.no_grad()
     def step(self, closure=None):
 
+        if self.frequency == 1:
+            self._all_reduce("grads")
+
         self.optim.step(closure)
 
-        self._counter += 1
-        if self._counter % self.frequency == 0:
-            self._counter = 0
-            self.synchronize()
+        if self.frequency > 1:
+            self._counter += 1
+            if self._counter % self.frequency == 0:
+                self._counter = 0
+                self.synchronize()
 
     def synchronize(self):
-        self.avg_parameters()
+        self._all_reduce("params")
 
         # Momentum Buffers
         if self.momentum_buffer == "sync":
-            self.avg_parameters("momentum_buffer")
+            self._all_reduce("momentum_buffer")
 
         elif self.momentum_buffer == "zero":
-            if self.frequency > 1:
-                for pg in self.optim.param_groups:
-                    # Zero out momentum buffers
-                    pg["momentum"] *= 0.0
+            for pg in self.optim.param_groups:
+                # Zero out momentum buffers
+                pg["momentum"] *= 0.0
 
-    def avg_parameters(self, kind="params"):
-        params = []
-        world_size = dist.get_world_size()  # Get world size
+    def _all_reduce(self, kind):
+        tensors = []
+        world_size = dist.get_world_size()
         for group in self.optim.param_groups:
             for p in group["params"]:
+                t = None
                 if kind == "params":
-                    p.data.div_(world_size)
-                    params.append(p.data)
+                    t = p
+                elif kind == "grads":
+                    t = p.grad
                 elif kind == "momentum_buffer":
                     param_state = self.optim.state[p]
                     if "momentum_buffer" in param_state:
-                        buf = param_state["momentum_buffer"]
-                        buf.data.div_(world_size)
-                        params.append(buf.data)
-        communicate(params, dist.all_reduce)
+                        t = param_state["momentum_buffer"]
+                if t is not None:
+                    t.data.div_(world_size)
+                    tensors.append(t.data)
+
+        communicate(tensors, dist.all_reduce)
 
     def set_frequency(self, frequency):
-        self.avg_parameters()
+        self._all_reduce("params")
         self._counter = 0
         self.frequency = frequency
 

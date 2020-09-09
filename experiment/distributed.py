@@ -14,7 +14,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import pylot
 from pylot.experiment import VisionClassificationTrainExperiment as VCTE, Experiment
 from pylot.scheduler import WarmupScheduler
-from pylot.util import printc, dict_recursive_update
+from pylot.util import printc, dict_recursive_update, CUDATimer
 
 from .. import callbacks
 from .. import optim
@@ -125,9 +125,6 @@ class DistributedTrainExperiment(VCTE, DistributedExperiment):
             # self.checkpoint(tag=f"{epoch:03d}")
             self.log(epoch=epoch)
             self.train(epoch)
-
-            if isinstance(self.optim, optim.LocalOptim):
-                self.optim.synchronize()
             self.eval(epoch)
 
             if self.scheduler:
@@ -188,6 +185,13 @@ class PostLocalDTE(DistributedTrainExperiment):
     def run_epochs(self, start=0, end=None):
         end = self.epochs if end is None else end
         assert isinstance(self.optim, optim.LocalOptim)
+        # TODO factor out in an appropriate place
+        timing = self.get_param("log.timing", False)
+        if timing:
+            sync_timer = CUDATimer(unit="ms")
+            self.optim._all_reduce = sync_timer.wrap(
+                self.optim._all_reduce, label="t_sync"
+            )
 
         if start == 0:
             self.optim.set_frequency(1)
@@ -211,6 +215,9 @@ class PostLocalDTE(DistributedTrainExperiment):
             self.log(epoch=epoch)
             self.log(frequency=self.optim.frequency)
             self.train(epoch)
+            if timing:
+                self.log(sync_timer.measurements)
+                sync_timer.reset()
             self.eval(epoch)
 
             if self.scheduler:
