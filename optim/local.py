@@ -9,7 +9,13 @@ from ..comm import communicate
 
 class LocalOptim(Optimizer):
     def __init__(
-        self, params, inner_optim, frequency=1, momentum_buffer="local", **kwargs
+        self,
+        params,
+        inner_optim,
+        frequency=1,
+        momentum_buffer="local",
+        sync_grads=False,
+        **kwargs,
     ):
         if isinstance(inner_optim, str):
             inner_optim = getattr(torch.optim, inner_optim)(params, **kwargs)
@@ -19,6 +25,8 @@ class LocalOptim(Optimizer):
         self.frequency = frequency
         self._counter = 0
         self.momentum_buffer = momentum_buffer
+        # Whether to synchronize gradients or parameters of frequency =1
+        self.sync_grads = sync_grads
 
         assert momentum_buffer in (
             "local",
@@ -32,12 +40,12 @@ class LocalOptim(Optimizer):
     @torch.no_grad()
     def step(self, closure=None):
 
-        if self.frequency == 1:
+        if self.frequency == 1 and self.sync_grads:
             self._all_reduce("grads")
 
         self.optim.step(closure)
 
-        if self.frequency > 1:
+        if not sync_grads or self.frequency > 1:
             self._counter += 1
             if self._counter % self.frequency == 0:
                 self._counter = 0
