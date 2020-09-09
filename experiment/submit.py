@@ -16,6 +16,7 @@ import submitit
 
 from pylot.util import printc, setup_colored_traceback
 from geth.experiment import DistributedExperiment
+from geth.util import get_tcp_interface_name
 
 
 DEFAULT_CLUSTER_PARAMS = dict(
@@ -65,7 +66,13 @@ class CheckpointWrapper:
                 self.experiment.load()
                 self.experiment.resume()
 
-    def distributed_setup(self):
+    def distributed_setup(self, use_ethernet=False):
+        if use_ethernet:
+            os.environ['NCCL_SOCKET_IFNAME'] = get_tcp_interface_name(
+                network_interface_type=args.network_interface_type
+            )
+            os.environ['NCCL_IB_DISABLE'] = '1'
+
         job_env = submitit.JobEnvironment()
         master_node = job_env.hostnames[0]
         attrs = ["global_rank", "local_rank", "num_nodes", "num_tasks", "node"]
