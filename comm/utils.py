@@ -59,7 +59,7 @@ def group_by_dtype(tensors):
     return tensors_by_dtype
 
 
-def communicate(tensors, communication_op):
+def communicate(tensors, communication_op, group=dist.group.WORLD):
     """
     Communicate a list of tensors.
     Arguments:
@@ -71,8 +71,9 @@ def communicate(tensors, communication_op):
     tensors_by_dtype = group_by_dtype(tensors)
     for dtype in tensors_by_dtype:
         flat_tensor = flatten_tensors(tensors_by_dtype[dtype])
-        communication_op(tensor=flat_tensor)
+        communication_op(tensor=flat_tensor, group=group)
         for f, t in zip(
-                unflatten_tensors(flat_tensor, tensors_by_dtype[dtype]),
-                tensors_by_dtype[dtype]):
+            unflatten_tensors(flat_tensor, tensors_by_dtype[dtype]),
+            tensors_by_dtype[dtype],
+        ):
             t.copy_(f)
