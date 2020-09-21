@@ -7,7 +7,26 @@ from torch.optim import Optimizer
 from ..comm import communicate
 
 
-class LocalOptim(Optimizer):
+class OptimWrapper(Optimizer):
+
+    def __init__(self, params, inner_optim, **kwargs):
+        if isinstance(inner_optim, str):
+            inner_optim = getattr(torch.optim, inner_optim)(params, **kwargs)
+        self.optim = inner_optim
+
+    @property
+    def param_groups(self):
+        return self.optim.param_groups
+
+    @property
+    def defaults(self):
+        return self.optim.defaults
+
+    def zero_grad(self):
+        self.optim.zero_grad()
+
+
+class LocalOptim(OptimWrapper):
     def __init__(
         self,
         params,
@@ -97,9 +116,6 @@ class LocalOptim(Optimizer):
             f"{self.__class__.__name__}(frequency={self.frequency})\n{repr(self.optim)}"
         )
 
-    def zero_grad(self):
-        self.optim.zero_grad()
-
     def state_dict(self):
         state_dict = self.optim.state_dict()
         state_dict["frequency"] = self.frequency
@@ -109,10 +125,3 @@ class LocalOptim(Optimizer):
         self.frequency = state_dict.get("frequency", 1)
         self.optim.load_state_dict(state_dict)
 
-    @property
-    def param_groups(self):
-        return self.optim.param_groups
-
-    @property
-    def defaults(self):
-        return self.optim.defaults
