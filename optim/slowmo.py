@@ -23,12 +23,7 @@ class SlowMo(LocalOptim):
         # TODO implement this
         self.slowmo_frequency = slowmo_frequency
 
-        for group in self.param_groups:
-            for p in group["params"]:
-                param_state = self.state[p]
-                if "old_param" not in param_state:
-                    param_state["old_param"] = torch.clone(p.data).detach()
-
+    @torch.no_grad()
     def step(self, closure=None):
         super().step(closure=closure)
 
@@ -37,6 +32,7 @@ class SlowMo(LocalOptim):
         if frequency > 1 and self._counter % frequency == 0:
             self.global_momentum_step()
 
+    @torch.no_grad()
     def global_momentum_step(self):
 
         for group in self.param_groups:
@@ -44,6 +40,11 @@ class SlowMo(LocalOptim):
 
             for p in group["params"]:
                 param_state = self.state[p]
+
+                if "old_param" not in param_state:
+                    param_state["old_param"] = torch.clone(p.data).detach()
+                    continue
+
                 old_data = param_state["old_param"]
 
                 if "global_momentum_buffer" not in param_state:
