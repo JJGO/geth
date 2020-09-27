@@ -8,7 +8,6 @@ from ..comm import communicate
 
 
 class OptimWrapper(Optimizer):
-
     def __init__(self, params, inner_optim, **kwargs):
         if isinstance(inner_optim, str):
             inner_optim = getattr(torch.optim, inner_optim)(params, **kwargs)
@@ -17,6 +16,10 @@ class OptimWrapper(Optimizer):
     @property
     def param_groups(self):
         return self.optim.param_groups
+
+    @property
+    def state(self):
+        return self.optim.state
 
     @property
     def defaults(self):
@@ -43,8 +46,8 @@ class LocalOptim(OptimWrapper):
         self.optim = inner_optim
         self.frequency = frequency
         self._counter = 0
-        self.momentum_buffer = momentum_buffer
         # Whether to synchronize gradients or parameters of frequency =1
+        self.momentum_buffer = momentum_buffer
         self.sync_grads = sync_grads
 
         assert momentum_buffer in (
@@ -67,7 +70,7 @@ class LocalOptim(OptimWrapper):
         if not self.sync_grads or self.frequency > 1:
             self._counter += 1
             if self._counter % self.frequency == 0:
-                self._counter = 0
+                # self._counter = 0
                 self.synchronize()
 
     def synchronize(self):
@@ -124,4 +127,3 @@ class LocalOptim(OptimWrapper):
     def load_state_dict(self, state_dict):
         self.frequency = state_dict.get("frequency", 1)
         self.optim.load_state_dict(state_dict)
-
