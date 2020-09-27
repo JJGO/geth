@@ -122,8 +122,10 @@ class LocalOptim(OptimWrapper):
     def state_dict(self):
         state_dict = self.optim.state_dict()
         state_dict["frequency"] = self.frequency
+        state_dict["counter"] = self._counter
         return state_dict
 
     def load_state_dict(self, state_dict):
         self.frequency = state_dict.get("frequency", 1)
+        self._counter = state_dict.get("counter", 0)
         self.optim.load_state_dict(state_dict)
