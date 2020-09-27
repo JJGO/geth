@@ -12,7 +12,7 @@ class HyperOptim(LocalOptim):
         super().__init__(params, inner_optim, **kwargs)
         self.dim = dim
         self.neighbors = None
-        self.i = 0
+        self.dim_counter = 0
 
     def _init_neighbors(self):
         world_size = dist.get_world_size()
@@ -29,10 +29,22 @@ class HyperOptim(LocalOptim):
 
     def set_dim(self, dim):
         self.dim = dim
-        self.i = 0
+        self.dim_counter = 0
         self._init_neighbors()
 
-    def _all_reduce(self, kind):
+    def synchronize(self):
+        self._sync("params")
+
+        # Momentum Buffers
+        if self.momentum_buffer == "sync":
+            self._sync("momentum_buffer")
+
+        elif self.momentum_buffer == "zero":
+            for pg in self.optim.param_groups:
+                # Zero out momentum buffers
+                pg["momentum"] *= 0.0
+
+    def _sync(self, kind):
         if self.neighbors is None:
             self._init_neighbors()
         tensors = []
@@ -52,5 +64,16 @@ class HyperOptim(LocalOptim):
                     t.data.div_(group_size)
                     tensors.append(t.data)
 
-        communicate(tensors, dist.all_reduce, group=self.neighbors[self.i])
-        self.i = (self.i + 1) % len(self.neighbors)
+        communicate(tensors, dist.all_reduce, group=self.neighbors[self.dim_counter])
+        self.dim_counter = (self.dim_counter + 1) % len(self.neighbors)
+
+    def state_dict(self):
+        state_dict = super().state_dict()
+        state_dict["dim"] = self.dim
+        state_dict["dim_counter"] = self.dim_counter
+        return state_dict
+
+    def load_state_dict(self, state_dict):
+        self.dim = state_dict.get("dim", 1)
+        self.dim_counter = state_dict.get("dim_counter", 0)
+        super().load_state_dict(state_dict)
