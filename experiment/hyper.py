@@ -14,6 +14,7 @@ class HyperDTE(DistributedTrainExperiment):
     ):
 
         self.dim_switch = dict(dim_switch)
+        super().build_train(optim, epochs, **optim_kwargs)
 
     @property
     def checkpoint_path(self):
