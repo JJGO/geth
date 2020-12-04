@@ -21,9 +21,9 @@ from geth.util import get_tcp_interface_name
 
 DEFAULT_CLUSTER_PARAMS = dict(
     timeout_min=60 * 3,
-    slurm_partition="priority,learnfair,scavenge",
+    slurm_partition="priority,learnfair",
     cpus_per_task=10,
-    slurm_comment="MLSys 2021 Deadline 10/10",
+    slurm_comment="MLSys 2021 Rebuttal 12/7",
     # gpus_per_node=1,
     # tasks_per_node=1,
     # nodes=1,
@@ -45,7 +45,7 @@ class CheckpointWrapper:
         # This makes looking at errors much nicer
         setup_colored_traceback()
 
-        os.umask(0o000)
+        # os.umask(0o000)
 
         # from torch.utils.collect_env import get_pretty_env_info
         # print(get_pretty_env_info())
