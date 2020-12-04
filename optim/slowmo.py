@@ -22,6 +22,8 @@ class SlowMo(LocalOptim):
         # Only if it's different from LocalOpim frequency
         # TODO implement this
         self.slowmo_frequency = slowmo_frequency
+        # TODO keep track of when old_param was set to avoid
+        # using it when is older than current - frequency
 
     @torch.no_grad()
     def step(self, closure=None):

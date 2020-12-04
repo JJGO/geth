@@ -4,6 +4,8 @@ import torch.distributed as dist
 
 from torch.optim import Optimizer
 
+from pylot.optim.lars import SGDLARS
+
 from ..comm import communicate
 
 
@@ -39,7 +41,9 @@ class LocalOptim(OptimWrapper):
         sync_grads=False,
         **kwargs,
     ):
-        if isinstance(inner_optim, str):
+        if inner_optim == "SGDLARS":
+            inner_optim = SGDLARS(params, **kwargs)
+        elif isinstance(inner_optim, str):
             inner_optim = getattr(torch.optim, inner_optim)(params, **kwargs)
         assert isinstance(inner_optim, Optimizer)
 
