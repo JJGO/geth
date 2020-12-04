@@ -14,15 +14,16 @@ import torch
 import torch.distributed as dist
 import submitit
 
-from pylot.util import printc, setup_colored_traceback
+from pylot.util import printc, setup_colored_traceback, allbut
 from geth.experiment import DistributedExperiment
 from geth.util import get_tcp_interface_name
 
 
 DEFAULT_CLUSTER_PARAMS = dict(
     timeout_min=60 * 3,
-    slurm_partition="learnfair",
+    slurm_partition="priority,learnfair,scavenge",
     cpus_per_task=10,
+    slurm_comment="MLSys 2021 Deadline 10/10",
     # gpus_per_node=1,
     # tasks_per_node=1,
     # nodes=1,
@@ -43,6 +44,8 @@ class CheckpointWrapper:
     def __call__(self, **kwargs):
         # This makes looking at errors much nicer
         setup_colored_traceback()
+
+        os.umask(0o000)
 
         # from torch.utils.collect_env import get_pretty_env_info
         # print(get_pretty_env_info())
@@ -66,12 +69,13 @@ class CheckpointWrapper:
                 self.experiment.load()
                 self.experiment.resume()
 
-    def distributed_setup(self, use_ethernet=False):
-        if use_ethernet:
-            os.environ['NCCL_SOCKET_IFNAME'] = get_tcp_interface_name(
-                network_interface_type=args.network_interface_type
+    def distributed_setup(self):
+        if self.cluster_params.get("use_ethernet", False):
+            printc("Forcing ethernet communication", color="CYAN")
+            os.environ["NCCL_SOCKET_IFNAME"] = get_tcp_interface_name(
+                network_interface_type="ethernet"
             )
-            os.environ['NCCL_IB_DISABLE'] = '1'
+            os.environ["NCCL_IB_DISABLE"] = "1"
 
         job_env = submitit.JobEnvironment()
         master_node = job_env.hostnames[0]
@@ -203,7 +207,8 @@ def submit_experiment(experiment, cfg, cluster_params=None, local=False):
     submit, kwargs, cluster_params = prepare_experiment(experiment, cfg, cluster_params)
     executor = get_executor(local=local)
 
-    executor.update_parameters(**cluster_params)
+    cluster_params["slurm_gres"] = f"gpu:volta:{cluster_params.pop('gpus_per_node')}"
+    executor.update_parameters(**allbut(cluster_params, ["use_ethernet"]))
     job = executor.submit(submit, **kwargs)
     print(f"Submitted job {job.job_id}")
     return job
@@ -227,7 +232,7 @@ def batch_submit_experiments(experiments, batch, cluster_params=None):
 
     # _cluster_params["gpus_per_node"] = f"volta:{_cluster_params['gpus_per_node']}"
     _cluster_params["slurm_gres"] = f"gpu:volta:{_cluster_params.pop('gpus_per_node')}"
-    executor.update_parameters(**_cluster_params)
+    executor.update_parameters(**allbut(_cluster_params, ["use_ethernet"]))
 
     jobs = []
     with executor.batch():
