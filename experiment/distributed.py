@@ -30,6 +30,10 @@ class DistributedExperiment(Experiment):
             assert env["num_tasks"] == self.get_param("distributed.world_size")
             # Differs from TrainExperiment in specializing the path to the replica number
             self.path = self.parent_path / str(env["global_rank"])
+        # Config can't be saved lazily since path is used when submitting
+        # distributed experiments with multiple replicas that need to
+        # agree on a path
+        self.save_config()
 
     @property
     def is_master(self):
